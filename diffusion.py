@@ -74,7 +74,7 @@ class Diffusion:
 
         return betas
 
-    def q_sample(self, x_start: torch.Tensor, t: np.ndarray, noise: torch.Tensor = None) -> torch.Tensor:
+    def q_sample(self, x_start: torch.Tensor, t: torch.Tensor, noise: torch.Tensor = None) -> torch.Tensor:
         """ Sample from q(x_t | x_0)
 
         Args:
@@ -96,7 +96,7 @@ class Diffusion:
         assert x_t.shape == x_start.shape
         return x_t
 
-    def q_posterior_mean_variance(self, x_start: torch.Tensor, x_t: torch.Tensor, t: np.ndarray) -> \
+    def q_posterior_mean_variance(self, x_start: torch.Tensor, x_t: torch.Tensor, t: torch.Tensor) -> \
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """ Compute the mean and variance of q(x_{t-1} | x_t, x_0)
 
@@ -169,24 +169,8 @@ class Diffusion:
         return terms
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def _slice(arr: np.ndarray, timesteps: np.ndarray, broadcast_shape: torch.Size) -> torch.Tensor:
-    sliced_arr = torch.from_numpy(arr)[timesteps]
+def _slice(arr: np.ndarray, timesteps: torch.Tensor, broadcast_shape: torch.Size) -> torch.Tensor:
+    sliced_arr = torch.from_numpy(arr)[timesteps].float()
     while sliced_arr.ndim < len(broadcast_shape):
         sliced_arr = sliced_arr[..., np.newaxis]
     return sliced_arr.expand(broadcast_shape)
