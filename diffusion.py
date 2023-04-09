@@ -27,12 +27,12 @@ def get_timestep_embeddings(timesteps: np.ndarray, out_dim: int, max_period: int
 
 
 class Diffusion:
-    def __init__(self):
-        self.num_diffusion_timesteps = 1000
-        self.max_beta = 0.999
-        self.s = 0.008
-        self.lambda_variational = 0.001
-        self.betas= self.get_beta_schedule(self.num_diffusion_timesteps, self.max_beta, self.s)
+    def __init__(self, **kwargs):
+        self.num_diffusion_timesteps = kwargs['num_diffusion_timesteps']
+        self.max_beta = kwargs['max_beta']
+        self.s = kwargs['s']
+        self.lambda_variational = kwargs['lambda_variational']
+        self.betas = self.get_beta_schedule(self.num_diffusion_timesteps, self.max_beta, self.s)
         self.alphas = 1 - self.betas
         self.sqrt_alphas = np.sqrt(self.alphas)
         self.alphas_cumprod = np.cumprod(self.alphas, axis=0)
@@ -47,6 +47,7 @@ class Diffusion:
         self.q_posterior_mean_coef_x0 = self.sqrt_alphas_cumprod_prev / self.one_minus_alphas_cumprod * self.betas
         self.q_posterior_coef_xt = self.sqrt_alphas * self.one_minus_alphas_cumprod_prev / self.one_minus_alphas_cumprod
         self.recip_sqrt_alphas = 1.0 / self.sqrt_alphas
+        self.recip_sqrt_alphas_cumprod = 1.0 / self.sqrt_alphas_cumprod
         self.recip_sqrt_one_minus_alphas_cumprod = 1.0 / self.sqrt_one_minus_alphas_cumprod
         self.log_betas = np.log(self.betas)
 
@@ -123,12 +124,25 @@ class Diffusion:
         )
         return q_posterior_mean, q_posterior_variance, q_posterior_log_variance_clipped
 
-    def p_mean_variance(self, x_t, t, eps, var_signal, q_posterior_log_variance_clipped):
-        p_mean = _slice(self.recip_sqrt_alphas, t, x_t.shape) * \
-            (x_t - _slice(self.recip_sqrt_one_minus_alphas_cumprod * self.betas, t, x_t.shape) * eps)
+    def predict_x_start_from_noise(self, x_t, t, eps):
+        assert x_t.shape == eps.shape
+        assert t.shape == (x_t.shape[0],)
+        x_start = _slice(self.recip_sqrt_alphas_cumprod, t, x_t.shape) * \
+            (x_t - _slice(self.sqrt_one_minus_alphas_cumprod, t, eps.shape) * eps)
+        assert x_start.shape == x_t.shape
+        return x_start
+
+    def p_mean_variance(self, x_t, t, eps, var_signal, clip_denoised=False):
+        assert all(x_t.shape == tensor.shape for tensor in (eps, var_signal))
+        x_start_pred = self.predict_x_start_from_noise(x_t, t, eps)
+        if clip_denoised:
+            x_start_pred = torch.clamp(x_start_pred, -1.0, 1.0)
+        p_mean, _, _ = self.q_posterior_mean_variance(x_start_pred, x_t, t)
 
         v = (var_signal + 1.0) / 2.0
-        p_log_variance = v * _slice(self.log_betas, t, v.shape) + (1.0 - v) * q_posterior_log_variance_clipped
+        min_log_variance = _slice(self.q_posterior_log_variance_clipped, t, v.shape)
+        max_log_variance = _slice(self.log_betas, t, v.shape)
+        p_log_variance = v * max_log_variance + (1.0 - v) * min_log_variance
         p_variance = torch.exp(p_log_variance)
         assert all(x_t.shape == tensor.shape for tensor in (p_mean, p_log_variance, p_variance))
         return p_mean, p_variance, p_log_variance
@@ -142,13 +156,13 @@ class Diffusion:
         x_t = self.q_sample(x_start, t, noise)
         q_posterior_mean, _, q_posterior_log_variance_clipped = self.q_posterior_mean_variance(x_start, x_t, t)
 
-        model_output = model(x_t, t, model_kwargs.get('y'))
+        model_output = model(x_t, t.float(), model_kwargs.get('y'))
         eps, var_signal = torch.chunk(model_output, 2, dim=1)
 
         assert all(x_start.shape == tensor.shape for tensor in (eps, var_signal))
         assert var_signal.shape == q_posterior_log_variance_clipped.shape
 
-        p_mean, _, p_log_variance = self.p_mean_variance(x_t, t, eps.detach(), var_signal, q_posterior_log_variance_clipped)
+        p_mean, _, p_log_variance = self.p_mean_variance(x_t, t, eps.detach(), var_signal, clip_denoised=True)
 
         # calculate mse loss
         mse = torch.mean((noise - eps)**2, dim=list(range(1, noise.ndim)))
@@ -167,6 +181,23 @@ class Diffusion:
             'loss': total_loss
         }
         return terms
+
+    def p_sample(self, model, shape, model_kwargs=None):
+        if model_kwargs is None:
+            model_kwargs = {}
+        assert isinstance(shape, (torch.Size, tuple, list))
+        x = torch.randn(*shape)
+        n = x.shape[0]
+        sequence = range(len(self.betas))
+        for timestep in reversed(list(sequence)):
+            t = torch.ones(n) * timestep
+            with torch.no_grad():
+                model_output = model(x, t.float(), model_kwargs.get('y'))
+                eps, var_signal = torch.chunk(model_output, 2, dim=1)
+                p_mean, _, p_log_variance = self.p_mean_variance(x, t.long(), eps, var_signal, clip_denoised=True)
+                none_zero_mask = (t != 0).float().view(-1, *([1] * (x.ndim - 1)))
+                x = p_mean + none_zero_mask * torch.exp(0.5 * p_log_variance) * torch.randn_like(x)
+        return x
 
 
 def _slice(arr: np.ndarray, timesteps: torch.Tensor, broadcast_shape: torch.Size) -> torch.Tensor:
