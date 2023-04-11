@@ -1,15 +1,16 @@
-import os
 import sys
 from pathlib import Path
 import argparse
 
 import torch
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+
 import yaml
 import numpy as np
 
 from unet import UnetModel
 from diffusion import Diffusion
+from datasets import load_sat25k
 
 
 def parse_config(config_path):
@@ -36,7 +37,17 @@ def main():
     params.update(vars(args))
 
     # load data
-    train_loader = ...
+    train_loader = load_sat25k(
+        data_dir=params['data_dir'],
+        batch_size=params['train_batch_size'],
+        image_size=params['image_size'],
+        image_channels=params['image_channels'],
+        image_max_value=params['image_max_value'],
+        image_min_value=params['image_min_value'],
+        num_classes=params['num_classes'],
+        is_train=True,
+        shuffle=True
+    )
 
     # create diffusion
     diffusion = Diffusion(**params)
