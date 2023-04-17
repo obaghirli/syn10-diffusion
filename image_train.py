@@ -1,42 +1,83 @@
+import os
 import sys
 from pathlib import Path
 import argparse
 
 import torch
-from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+import torch.distributed as dist
+from torch.distributed.elastic.multiprocessing.errors import record
+
 
 import yaml
-import numpy as np
 
 from unet import UnetModel
 from diffusion import Diffusion
 from datasets import load_sat25k
+from train_utils import Trainer
+
+from typing import Optional
 
 
-def parse_config(config_path):
+def parse_config(config_path: Optional[str]):
+    if config_path is None:
+        return {}
+    if not Path(config_path).exists():
+        raise FileNotFoundError(f"Config file {config_path} not found")
     with open(config_path, 'r') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
     return config
 
 
+def resolve_params(parser_args, config, dist_args):
+    params = {}
+    params.update(config)
+    params.update(vars(parser_args))
+    params.update(dist_args)
+    if parser_args.run_id is not None:
+        params['run_id'] = parser_args.run_id
+    validate_params(params, parser_args, config, dist_args)
+    return params
+
+
+def validate_params(params, parser_args, config, dist_args):
+    if params['artifact_dir'] is None:
+        raise RuntimeError("Artifact directory must be specified")
+    not_parser_run_id = parser_args.run_id is None
+    not_parser_resume_step = parser_args.resume_step is None
+    if not_parser_run_id ^ not_parser_resume_step:
+        raise RuntimeError("Both run_id and resume_step must be specified")
+    assert isinstance(params['grad_clip'], float), "grad_clip must be a float"
+
+
+def setup_directories(params):
+    artifact_dir = Path(params['artifact_dir'])
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = artifact_dir / params['run_id']
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+
+@record
 def main():
     parser = argparse.ArgumentParser(description="Training")
     parser.add_argument("--config", help="path to config file", type=str)
-    parser.add_argument("--use_ddp", help="whether to use ddp", action="store_true")
-    args = parser.parse_args()
+    parser.add_argument("--run_id", help="torch elastic run id (checkpoint id)", type=str)
+    parser.add_argument("--resume_step", help="step to continue from", type=int)
 
-    config = None
-    if args.config is not None:
-        if not Path(args.config).exists():
-            raise FileNotFoundError(f"Config file {args.config} not found")
-        config = parse_config(Path(args.config))
+    parser_args = parser.parse_args()
+    config = parse_config(parser_args.config)
 
-    params = {}
-    if config is not None:
-        params.update(config)
-    params.update(vars(args))
+    dist.init_process_group(backend='nccl', init_method='env://')
+    local_rank = int(os.environ['LOCAL_RANK'])
+    run_id = os.environ['TORCHELASTIC_RUN_ID']
 
-    # load data
+    dist_args = {
+        "local_rank": local_rank,
+        "run_id": run_id
+    }
+
+    params = resolve_params(parser_args, config, dist_args)
+    setup_directories(params)
+
     train_loader = load_sat25k(
         data_dir=params['data_dir'],
         batch_size=params['train_batch_size'],
@@ -49,37 +90,12 @@ def main():
         shuffle=True
     )
 
-    # create diffusion
     diffusion = Diffusion(**params)
-
-    # create model
-    model = UnetModel(**params)
-    if all([torch.cuda.is_available(), args.use_ddp]):
-        model = DDP(model)
-
-    # create optimizer
-    optim = torch.optim.Adam(model.parameters(), lr=params['lr'])
-
-    global_step = 0
-    while True:
-        x, y = next(train_loader)
-        n = x.shape[0]
-        t = torch.from_numpy(np.random.choice(len(diffusion.num_diffusion_timesteps), size=(n,))).long()
-
-        loss_terms = diffusion.training_losses(model, x, t, model_kwargs={'y': y})
-        loss = loss_terms['loss']
-
-        optim.zero_grad()
-        loss.backward()
-
-        try:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), params['grad_clip'])
-        except Exception:
-            pass
-
-        optim.step()
-        global_step += 1
+    model = UnetModel(**params).to(local_rank)
+    trainer = Trainer(model=model, diffusion=diffusion, data=train_loader, **params)
+    trainer.run()
 
 
 if __name__ == "__main__":
+    print(f"Starting job: {os.environ['TORCHELASTIC_RUN_ID']}")
     sys.exit(main())

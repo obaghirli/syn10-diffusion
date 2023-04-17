@@ -1,6 +1,7 @@
 import numpy as np
 from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
+import torch.distributed as dist
 
 from typing import Union
 
@@ -25,6 +26,8 @@ class SAT25K(Dataset):
         self.image_max_value = image_max_value
         self.image_min_value = image_min_value
         self.num_classes = num_classes
+        self.shard_id = dist.get_rank()
+        self.num_shards = dist.get_world_size()
 
         if not self.root_dir.exists():
             raise FileNotFoundError(f"Dataset root directory {self.root_dir} not found")
@@ -37,8 +40,8 @@ class SAT25K(Dataset):
         if not self.annotation_dir.exists():
             raise FileNotFoundError(f"Dataset annotation directory {self.annotation_dir} not found")
 
-        self.image_files = sorted(list(self.image_dir.glob('**/*.npy')))
-        self.annotation_files = sorted(list(self.annotation_dir.glob('**/*.npy')))
+        self.image_files = sorted(list(self.image_dir.glob('**/*.npy')))[self.shard_id:][::self.num_shards]
+        self.annotation_files = sorted(list(self.annotation_dir.glob('**/*.npy')))[self.shard_id:][::self.num_shards]
 
         assert len(self.image_files) == len(self.annotation_files)
 
@@ -90,7 +93,7 @@ def load_sat25k(
 ):
     if not isinstance(data_dir, Path):
         data_dir = Path(data_dir)
-    root_dir = data_dir / 'training' if is_train else 'validation'
+    root_dir = data_dir / 'training' if is_train else data_dir / 'validation'
     dataset = SAT25K(root_dir, image_size, image_channels, image_max_value, image_min_value, num_classes)
     loader = DataLoader(
         dataset,

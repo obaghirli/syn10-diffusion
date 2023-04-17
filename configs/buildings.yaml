@@ -14,3 +14,6 @@ grad_clip: 1.0
 data_dir: "/home/orkhan/sat25k"
 train_batch_size: 8
 sample_batch_size: 8
+artifact_dir: "/tmp/syn10"
+checkpoint_freq: 100
+

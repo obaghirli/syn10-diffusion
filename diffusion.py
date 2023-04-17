@@ -201,7 +201,7 @@ class Diffusion:
 
 
 def _slice(arr: np.ndarray, timesteps: torch.Tensor, broadcast_shape: torch.Size) -> torch.Tensor:
-    sliced_arr = torch.from_numpy(arr)[timesteps].float()
+    sliced_arr = torch.from_numpy(arr).to(device=timesteps.device)[timesteps].float()
     while sliced_arr.ndim < len(broadcast_shape):
         sliced_arr = sliced_arr[..., np.newaxis]
     return sliced_arr.expand(broadcast_shape)
