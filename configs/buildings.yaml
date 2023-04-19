@@ -16,4 +16,5 @@ train_batch_size: 8
 sample_batch_size: 8
 artifact_dir: "/tmp/syn10"
 checkpoint_freq: 100
+tensorboard_freq: 100
 

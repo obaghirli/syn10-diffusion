@@ -14,8 +14,9 @@ from unet import UnetModel
 from diffusion import Diffusion
 from datasets import load_sat25k
 from train_utils import Trainer
-
-from typing import Optional
+from globals import Globals
+from logger import DistributedLogger
+from typing import Optional, Union
 
 
 def parse_config(config_path: Optional[str]):
@@ -50,16 +51,19 @@ def validate_params(params, parser_args, config, dist_args):
 
 
 def setup_directories(params):
-    artifact_dir = Path(params['artifact_dir'])
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    run_dir = artifact_dir / params['run_id']
-    run_dir.mkdir(parents=True, exist_ok=True)
+    rank = int(os.environ['RANK'])
+    if rank == 0:
+        artifact_dir = Path(params['artifact_dir'])
+        run_dir = artifact_dir / params['run_id']
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        run_dir.mkdir(parents=True, exist_ok=True)
 
 
 @record
 def main():
     parser = argparse.ArgumentParser(description="Training")
     parser.add_argument("--config", help="path to config file", type=str)
+    parser.add_argument("--is_train", help="train or val", type=bool, default=True)
     parser.add_argument("--run_id", help="torch elastic run id (checkpoint id)", type=str)
     parser.add_argument("--resume_step", help="step to continue from", type=int)
 
@@ -71,13 +75,20 @@ def main():
     run_id = os.environ['TORCHELASTIC_RUN_ID']
 
     dist_args = {
-        "local_rank": local_rank,
         "run_id": run_id
     }
 
     params = resolve_params(parser_args, config, dist_args)
+    _globals = Globals()
+    _globals.params = params
     setup_directories(params)
-
+    logger = DistributedLogger()
+    logger.log_info(
+        f"{'Resuming' if params['resume_step'] is not None else 'Starting'} job_id: {params['run_id']}"
+        f"{' from step: ' + str(params['resume_step']) if params['resume_step'] is not None else ''}"
+    )
+    logger.log_info(str(params))
+    logger.log_info("Loading data")
     train_loader = load_sat25k(
         data_dir=params['data_dir'],
         batch_size=params['train_batch_size'],
@@ -90,12 +101,17 @@ def main():
         shuffle=True
     )
 
+    logger.log_info("Creating diffusion")
     diffusion = Diffusion(**params)
+    logger.log_info("Creating model")
     model = UnetModel(**params).to(local_rank)
+    logger.log_info("Creating trainer")
     trainer = Trainer(model=model, diffusion=diffusion, data=train_loader, **params)
+    logger.log_info("Starting training")
     trainer.run()
+    logger.log_info("Training finished")
+    dist.destroy_process_group()
 
 
 if __name__ == "__main__":
-    print(f"Starting job: {os.environ['TORCHELASTIC_RUN_ID']}")
     sys.exit(main())

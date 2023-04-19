@@ -5,6 +5,7 @@ from torch.nn.utils import clip_grad_norm_
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 import numpy as np
 from pathlib import Path
+from logger import DistributedLogger, TBSummaryWriter
 
 
 class Trainer:
@@ -14,11 +15,16 @@ class Trainer:
         self.data = data
         self.rank = int(os.environ['RANK'])
         self.local_rank = int(os.environ['LOCAL_RANK'])
+        self.world_size = int(os.environ['WORLD_SIZE'])
         self.run_id = params['run_id']
         self.run_dir = Path(params['artifact_dir']) / self.run_id
         self.step = 0
         self.grad_clip = params['grad_clip']
         self.checkpoint_freq = params['checkpoint_freq']
+        self.tensorboard_freq = params['tensorboard_freq']
+
+        self.dlogger = DistributedLogger()
+        self.tb_writer = TBSummaryWriter(log_dir=self.run_dir)
 
         if params['resume_step'] is not None:
             self.load_model_checkpoint(params['resume_step'])
@@ -50,20 +56,17 @@ class Trainer:
         self.step = optimizer_checkpoint['step']
 
     def save_checkpoint(self, step):
-        if self.rank == 0:
-            model_checkpoint_path = self.run_dir / f"model_checkpoint_{step}.pt.tar"
-            optimizer_checkpoint_path = self.run_dir / f"optimizer_checkpoint_{step}.pt.tar"
+        model_checkpoint_path = self.run_dir / f"model_checkpoint_{step}.pt.tar"
+        optimizer_checkpoint_path = self.run_dir / f"optimizer_checkpoint_{step}.pt.tar"
 
-            torch.save({
-                'model_state_dict': self.ddp_model.module.state_dict(),
-            }, model_checkpoint_path)
+        torch.save({
+            'model_state_dict': self.ddp_model.module.state_dict(),
+        }, model_checkpoint_path)
 
-            torch.save({
-                'step': step,
-                'optimizer_state_dict': self.optimizer.state_dict()
-            }, optimizer_checkpoint_path)
-
-        dist.barrier()
+        torch.save({
+            'step': step,
+            'optimizer_state_dict': self.optimizer.state_dict()
+        }, optimizer_checkpoint_path)
 
     def run(self):
         while True:
@@ -86,6 +89,12 @@ class Trainer:
             self.step += 1
             print(f"step: {self.step}", end='\r')
 
-            if self.step % self.checkpoint_freq == 0:
+            if self.step % self.checkpoint_freq == 0 and self.rank == 0:
                 self.save_checkpoint(self.step)
+            if self.step % self.tensorboard_freq == 0 and self.rank == 0:
+                average_loss = loss.clone()
+                dist.all_reduce(average_loss, op=dist.ReduceOp.SUM)
+                average_loss /= self.world_size
+                self.tb_writer.add_scalars("train", {"average_loss": average_loss.item()}, self.step)
+            dist.barrier()
 
