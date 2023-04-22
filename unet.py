@@ -1,4 +1,7 @@
 import torch
+from utils import seed_all
+
+seed_all()
 
 
 class UnetModel(torch.nn.Module):
@@ -13,7 +16,7 @@ class UnetModel(torch.nn.Module):
             padding=1
         )
 
-    def forward(self, x, t, y=None):
+    def forward(self, x, t, y):
         x = self.conv2d(x)
         return x
 

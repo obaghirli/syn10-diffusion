@@ -1,8 +1,11 @@
 # Denoising Diffusion Probabilistic Models
 
-from typing import Tuple
 import torch
 import numpy as np
+from typing import Tuple
+from utils import seed_all
+
+seed_all()
 
 
 def get_timestep_embeddings(timesteps: np.ndarray, out_dim: int, max_period: int = 10000) -> np.ndarray:
@@ -156,7 +159,7 @@ class Diffusion:
         x_t = self.q_sample(x_start, t, noise)
         q_posterior_mean, _, q_posterior_log_variance_clipped = self.q_posterior_mean_variance(x_start, x_t, t)
 
-        model_output = model(x_t, t.float(), model_kwargs.get('y'))
+        model_output = model(x_t, t.float(), model_kwargs['y'])
         eps, var_signal = torch.chunk(model_output, 2, dim=1)
 
         assert all(x_start.shape == tensor.shape for tensor in (eps, var_signal))
@@ -186,13 +189,24 @@ class Diffusion:
         if model_kwargs is None:
             model_kwargs = {}
         assert isinstance(shape, (torch.Size, tuple, list))
-        x = torch.randn(*shape)
+        assert model.training is False
+
+        device = next(model.parameters()).device
+        y = model_kwargs['y']
+        guidance = model_kwargs['guidance']
+        g_ch = model_kwargs['model_out_ch'] // 2
+
+        x = torch.randn(*shape).to(device)
         n = x.shape[0]
+
         sequence = range(len(self.betas))
         for timestep in reversed(list(sequence)):
-            t = torch.ones(n) * timestep
             with torch.no_grad():
-                model_output = model(x, t.float(), model_kwargs.get('y'))
+                t = torch.ones(n).to(device) * timestep
+                model_output = model(x, t.float(), y)
+                model_output_zero = model(x, t.float(), torch.zeros_like(y))
+                model_output[:, :g_ch] = \
+                    model_output_zero[:, :g_ch] + guidance * (model_output[:, :g_ch] - model_output_zero[:, :g_ch])
                 eps, var_signal = torch.chunk(model_output, 2, dim=1)
                 p_mean, _, p_log_variance = self.p_mean_variance(x, t.long(), eps, var_signal, clip_denoised=True)
                 none_zero_mask = (t != 0).float().view(-1, *([1] * (x.ndim - 1)))

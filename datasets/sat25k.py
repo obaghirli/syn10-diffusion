@@ -4,6 +4,9 @@ from torch.utils.data import Dataset, DataLoader
 import torch.distributed as dist
 
 from typing import Union
+from utils import seed_all
+
+seed_all()
 
 
 class SAT25K(Dataset):
@@ -89,7 +92,8 @@ def load_sat25k(
         image_min_value: int,
         num_classes: int,
         is_train: bool,
-        shuffle: bool
+        shuffle: bool,
+        drop_last: bool
 ):
     if not isinstance(data_dir, Path):
         data_dir = Path(data_dir)
@@ -99,9 +103,8 @@ def load_sat25k(
         dataset,
         batch_size=batch_size,
         shuffle=shuffle,
-        num_workers=1,
-        drop_last=True
+        drop_last=drop_last,
+        num_workers=1
     )
-    while True:
-        yield from loader
+    return loader
 

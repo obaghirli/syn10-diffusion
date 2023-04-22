@@ -1,14 +1,12 @@
 import os
 import sys
+import yaml
 from pathlib import Path
 import argparse
 
 import torch
 import torch.distributed as dist
 from torch.distributed.elastic.multiprocessing.errors import record
-
-
-import yaml
 
 from unet import UnetModel
 from diffusion import Diffusion
@@ -17,6 +15,9 @@ from train_utils import Trainer
 from globals import Globals
 from logger import DistributedLogger
 from typing import Optional, Union
+from utils import seed_all
+
+seed_all()
 
 
 def parse_config(config_path: Optional[str]):
@@ -29,25 +30,20 @@ def parse_config(config_path: Optional[str]):
     return config
 
 
-def resolve_params(parser_args, config, dist_args):
+def resolve_params(parser_args, config):
     params = {}
     params.update(config)
     params.update(vars(parser_args))
-    params.update(dist_args)
-    if parser_args.run_id is not None:
-        params['run_id'] = parser_args.run_id
-    validate_params(params, parser_args, config, dist_args)
+    params.update({"run_id": parser_args.run_id or os.environ['TORCHELASTIC_RUN_ID']})
+    params.update({"is_train": True})
     return params
 
 
-def validate_params(params, parser_args, config, dist_args):
-    if params['artifact_dir'] is None:
-        raise RuntimeError("Artifact directory must be specified")
+def validate_args(parser_args):
     not_parser_run_id = parser_args.run_id is None
     not_parser_resume_step = parser_args.resume_step is None
     if not_parser_run_id ^ not_parser_resume_step:
-        raise RuntimeError("Both run_id and resume_step must be specified")
-    assert isinstance(params['grad_clip'], float), "grad_clip must be a float"
+        raise RuntimeError("Both run_id and resume_step must be specified to resume training")
 
 
 def setup_directories(params):
@@ -55,33 +51,29 @@ def setup_directories(params):
     if rank == 0:
         artifact_dir = Path(params['artifact_dir'])
         run_dir = artifact_dir / params['run_id']
-        artifact_dir.mkdir(parents=True, exist_ok=True)
         run_dir.mkdir(parents=True, exist_ok=True)
 
 
 @record
 def main():
     parser = argparse.ArgumentParser(description="Training")
-    parser.add_argument("--config", help="path to config file", type=str)
-    parser.add_argument("--is_train", help="train or val", type=bool, default=True)
+    parser.add_argument("--config", help="path to config file", type=str, required=True)
+    parser.add_argument("--data_dir", help="path to data directory", type=str, required=True)
+    parser.add_argument("--artifact_dir", help="path to output directory", type=str, required=True)
     parser.add_argument("--run_id", help="torch elastic run id (checkpoint id)", type=str)
     parser.add_argument("--resume_step", help="step to continue from", type=int)
 
     parser_args = parser.parse_args()
+    validate_args(parser_args)
     config = parse_config(parser_args.config)
-
-    dist.init_process_group(backend='nccl', init_method='env://')
-    local_rank = int(os.environ['LOCAL_RANK'])
-    run_id = os.environ['TORCHELASTIC_RUN_ID']
-
-    dist_args = {
-        "run_id": run_id
-    }
-
-    params = resolve_params(parser_args, config, dist_args)
+    params = resolve_params(parser_args, config)
     _globals = Globals()
     _globals.params = params
     setup_directories(params)
+
+    dist.init_process_group(backend='nccl', init_method='env://')
+    local_rank = int(os.environ['LOCAL_RANK'])
+
     logger = DistributedLogger()
     logger.log_info(
         f"{'Resuming' if params['resume_step'] is not None else 'Starting'} job_id: {params['run_id']}"
@@ -89,7 +81,7 @@ def main():
     )
     logger.log_info(str(params))
     logger.log_info("Loading data")
-    train_loader = load_sat25k(
+    data = load_sat25k(
         data_dir=params['data_dir'],
         batch_size=params['train_batch_size'],
         image_size=params['image_size'],
@@ -97,18 +89,24 @@ def main():
         image_max_value=params['image_max_value'],
         image_min_value=params['image_min_value'],
         num_classes=params['num_classes'],
-        is_train=True,
-        shuffle=True
+        is_train=params['is_train'],
+        shuffle=True,
+        drop_last=True,
     )
 
     logger.log_info("Creating diffusion")
     diffusion = Diffusion(**params)
+
     logger.log_info("Creating model")
     model = UnetModel(**params).to(local_rank)
+    model.train()
+
     logger.log_info("Creating trainer")
-    trainer = Trainer(model=model, diffusion=diffusion, data=train_loader, **params)
+    trainer = Trainer(model=model, diffusion=diffusion, data=data, **params)
+
     logger.log_info("Starting training")
     trainer.run()
+
     logger.log_info("Training finished")
     dist.destroy_process_group()
 

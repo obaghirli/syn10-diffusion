@@ -6,6 +6,9 @@ from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 import numpy as np
 from pathlib import Path
 from logger import DistributedLogger, TBSummaryWriter
+from utils import seed_all
+
+seed_all()
 
 
 class Trainer:
@@ -18,10 +21,12 @@ class Trainer:
         self.world_size = int(os.environ['WORLD_SIZE'])
         self.run_id = params['run_id']
         self.run_dir = Path(params['artifact_dir']) / self.run_id
-        self.step = 0
+        self.num_epochs = params['num_epochs']
         self.grad_clip = params['grad_clip']
         self.checkpoint_freq = params['checkpoint_freq']
         self.tensorboard_freq = params['tensorboard_freq']
+        self.step = 0
+        self.start_epoch = 0
 
         self.dlogger = DistributedLogger()
         self.tb_writer = TBSummaryWriter(log_dir=self.run_dir)
@@ -54,8 +59,9 @@ class Trainer:
         optimizer_checkpoint = torch.load(optimizer_checkpoint_path, map_location=f"cuda:{self.local_rank}")
         self.optimizer.load_state_dict(optimizer_checkpoint['optimizer_state_dict'])
         self.step = optimizer_checkpoint['step']
+        self.start_epoch = optimizer_checkpoint['epoch']
 
-    def save_checkpoint(self, step):
+    def save_checkpoint(self, step, epoch):
         model_checkpoint_path = self.run_dir / f"model_checkpoint_{step}.pt.tar"
         optimizer_checkpoint_path = self.run_dir / f"optimizer_checkpoint_{step}.pt.tar"
 
@@ -65,36 +71,61 @@ class Trainer:
 
         torch.save({
             'step': step,
+            'epoch': epoch,
             'optimizer_state_dict': self.optimizer.state_dict()
         }, optimizer_checkpoint_path)
 
     def run(self):
-        while True:
-            x, y = map(lambda tensor: tensor.to(self.local_rank), next(self.data))
-            n = x.shape[0]
-            t = torch.from_numpy(np.random.choice(len(self.diffusion.betas), size=(n,))).long().to(self.local_rank)
+        avg_loss = torch.zeros(1).to(self.local_rank)
+        avg_mse_loss = torch.zeros(1).to(self.local_rank)
+        avg_vlb_loss = torch.zeros(1).to(self.local_rank)
 
-            loss_terms = self.diffusion.training_losses(self.ddp_model, x, t, model_kwargs={'y': y})
-            loss = loss_terms['loss'].mean()
+        for epoch in range(self.start_epoch, self.num_epochs):
+            for i, (x, y) in enumerate(self.data):
+                x, y = map(lambda tensor: tensor.to(self.local_rank), (x, y))
+                n = x.shape[0]
+                t = torch.from_numpy(np.random.choice(len(self.diffusion.betas), size=(n,))).long().to(self.local_rank)
 
-            self.optimizer.zero_grad()
-            loss.backward()
+                loss_terms = self.diffusion.training_losses(self.ddp_model, x, t, model_kwargs={'y': y})
 
-            try:
-                clip_grad_norm_(self.ddp_model.parameters(), self.grad_clip)
-            except Exception:
-                pass
+                loss = loss_terms['loss'].mean()
+                mse = loss_terms['mse'].mean()
+                vlb = loss_terms['vlb'].mean()
 
-            self.optimizer.step()
-            self.step += 1
-            print(f"step: {self.step}", end='\r')
+                avg_loss += loss.clone() / self.tensorboard_freq
+                avg_mse_loss += mse.clone() / self.tensorboard_freq
+                avg_vlb_loss += vlb.clone() / self.tensorboard_freq
 
-            if self.step % self.checkpoint_freq == 0 and self.rank == 0:
-                self.save_checkpoint(self.step)
-            if self.step % self.tensorboard_freq == 0 and self.rank == 0:
-                average_loss = loss.clone()
-                dist.all_reduce(average_loss, op=dist.ReduceOp.SUM)
-                average_loss /= self.world_size
-                self.tb_writer.add_scalars("train", {"average_loss": average_loss.item()}, self.step)
-            dist.barrier()
+                self.optimizer.zero_grad()
+                loss.backward()
+
+                try:
+                    clip_grad_norm_(self.ddp_model.parameters(), self.grad_clip)
+                except Exception:
+                    pass
+
+                self.optimizer.step()
+                self.step += 1
+                print(f"epoch: {epoch}, step: {self.step}", end='\r')
+
+                if self.step % self.checkpoint_freq == 0 and self.rank == 0:
+                    self.save_checkpoint(self.step, epoch)
+                if self.step % self.tensorboard_freq == 0 and self.rank == 0:
+                    dist.all_reduce(avg_loss, op=dist.ReduceOp.SUM)
+                    dist.all_reduce(avg_mse_loss, op=dist.ReduceOp.SUM)
+                    dist.all_reduce(avg_vlb_loss, op=dist.ReduceOp.SUM)
+                    avg_loss /= self.world_size
+                    avg_mse_loss /= self.world_size
+                    avg_vlb_loss /= self.world_size
+                    self.tb_writer.add_scalars(
+                        "train", {
+                            "avg_loss": avg_loss.item(),
+                            "avg_mse_loss": avg_mse_loss.item(),
+                            "avg_vlb_loss": avg_vlb_loss.item()
+                        }, self.step
+                    )
+                    avg_loss.zero_()
+                    avg_mse_loss.zero_()
+                    avg_vlb_loss.zero_()
+                dist.barrier()
 
