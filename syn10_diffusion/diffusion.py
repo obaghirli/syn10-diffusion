@@ -1,9 +1,7 @@
-# Denoising Diffusion Probabilistic Models
-
 import torch
 import numpy as np
 from typing import Tuple
-from utils import seed_all
+from syn10_diffusion.utils import seed_all
 
 seed_all()
 

@@ -4,8 +4,8 @@ import logging
 from pathlib import Path
 from torch.utils.tensorboard import SummaryWriter
 from typing import Union
-from globals import Globals
-from utils import seed_all
+from syn10_diffusion.globals import Globals
+from syn10_diffusion.utils import seed_all
 
 seed_all()
 

@@ -7,28 +7,15 @@ import torch
 import torch.distributed as dist
 from torch.distributed.elastic.multiprocessing.errors import record
 import numpy as np
-import yaml
-from PIL import Image
-from unet import UnetModel
-from diffusion import Diffusion
-from datasets import load_sat25k
-from globals import Globals
-from logger import DistributedLogger
-from typing import Optional, Union
 
-from utils import seed_all
+from syn10_diffusion.unet import UnetModel
+from syn10_diffusion.diffusion import Diffusion
+from syn10_diffusion.sat25k import load_sat25k
+from syn10_diffusion.globals import Globals
+from syn10_diffusion.logger import DistributedLogger
+from syn10_diffusion.utils import seed_all, parse_config
 
 seed_all()
-
-
-def parse_config(config_path: Optional[str]):
-    if config_path is None:
-        return {}
-    if not Path(config_path).exists():
-        raise FileNotFoundError(f"Config file {config_path} not found")
-    with open(config_path, 'r') as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
-    return config
 
 
 def resolve_params(parser_args, config):
@@ -91,7 +78,7 @@ def main():
         num_classes=params['num_classes'],
         is_train=params['is_train'],
         shuffle=False,
-        drop_last=True,
+        drop_last=False,
     )
 
     logger.log_info("Creating sampler")
@@ -124,12 +111,12 @@ def main():
         sample = sample.permute(0, 2, 3, 1)
         sample = sample.contiguous()
 
-        y = y.to(torch.uint8)
         if params['num_classes'] > 2:
             classes = torch.arange(params['num_classes'], device=local_rank)
             classes = classes.unsqueeze(0).unsqueeze(2).unsqueeze(3)
             classes = classes.expand(y.shape)
             y = (classes * y).sum(dim=1, keepdim=True)
+        y = y.to(torch.uint8)
         y = y.permute(0, 2, 3, 1)
         y = y.contiguous()
 
@@ -146,13 +133,8 @@ def main():
         arr = np.concatenate(all_samples, axis=0)
         label_arr = np.concatenate(all_labels, axis=0)
         for i in range(arr.shape[0]):
-            sample = Image.fromarray(arr[i])
-            if params['num_classes'] == 2:
-                label = Image.fromarray(255 * label_arr[i].squeeze(), mode='L')
-            else:
-                label = Image.fromarray(label_arr[i].squeeze(), mode='L')
-            sample.save(Path(params['artifact_dir']) / params['run_id'] / "images" / f"sample_{i}.png")
-            label.save(Path(params['artifact_dir']) / params['run_id'] / "annotations" / f"label_{i}.png")
+            np.save(str(Path(params['artifact_dir']) / params['run_id'] / "images" / f"sample_{i}.npy"), arr[i])
+            np.save(str(Path(params['artifact_dir']) / params['run_id'] / "annotations" / f"label_{i}.npy"), label_arr[i])
 
     dist.barrier()
 

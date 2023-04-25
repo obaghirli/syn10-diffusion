@@ -4,7 +4,7 @@ from torch.utils.data import Dataset, DataLoader
 import torch.distributed as dist
 
 from typing import Union
-from utils import seed_all
+from syn10_diffusion.utils import seed_all
 
 seed_all()
 
@@ -60,8 +60,8 @@ class SAT25K(Dataset):
         return image, annotation
 
     def process_image(self, image: np.ndarray):
-        assert image.shape == (self.image_channels, self.image_size, self.image_size)
-        assert np.issubdtype(image.dtype, np.integer)
+        assert image.shape == (self.image_channels, self.image_size, self.image_size), image.shape
+        assert np.issubdtype(image.dtype, np.integer), image.dtype
         assert np.all(image >= self.image_min_value) and np.all(image <= self.image_max_value)
         image = image.astype(np.float32)
         image = (image - self.image_min_value) / (self.image_max_value - self.image_min_value)
@@ -70,16 +70,15 @@ class SAT25K(Dataset):
         return image
 
     def process_annotation(self, annotation: np.ndarray):
-        assert self.num_classes > 1
-        assert annotation.shape == (self.image_size, self.image_size)
-        assert np.issubdtype(annotation.dtype, np.integer)
+        assert annotation.shape == (self.image_size, self.image_size), annotation.shape
+        assert np.issubdtype(annotation.dtype, np.integer), annotation.dtype
         annotation_one_hot = np.zeros((self.num_classes, self.image_size, self.image_size))
         for i in range(self.num_classes):
             annotation_one_hot[i, :, :] = np.where(annotation == i, 1.0, 0.0)
-        assert annotation_one_hot.shape == (self.num_classes, self.image_size, self.image_size)
+        assert annotation_one_hot.shape == (self.num_classes, self.image_size, self.image_size), annotation_one_hot.shape
         if self.num_classes == 2:
             annotation_one_hot = annotation_one_hot[self.num_classes - 1, ...][None, ...]
-            assert annotation_one_hot.shape == (1, self.image_size, self.image_size)
+            assert annotation_one_hot.shape == (1, self.image_size, self.image_size), annotation_one_hot.shape
         return annotation_one_hot
 
 

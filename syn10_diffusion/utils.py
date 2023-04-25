@@ -1,3 +1,8 @@
+from typing import Optional
+from pathlib import Path
+import yaml
+
+
 def seed_all(seed=313):
     """
     Seed torch and numpy with the given seed, even if not imported.
@@ -20,3 +25,13 @@ def seed_all(seed=313):
         np.random.seed(seed)
     except ImportError:
         pass
+
+
+def parse_config(config_path: Optional[str]):
+    if config_path is None:
+        return {}
+    if not Path(config_path).exists():
+        raise FileNotFoundError(f"Config file {config_path} not found")
+    with open(config_path, 'r') as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+    return config

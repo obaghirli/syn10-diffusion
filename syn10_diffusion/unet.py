@@ -1,5 +1,5 @@
 import torch
-from utils import seed_all
+from syn10_diffusion.utils import seed_all
 
 seed_all()
 

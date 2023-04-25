@@ -1,33 +1,20 @@
 import os
 import sys
-import yaml
 from pathlib import Path
 import argparse
 
-import torch
 import torch.distributed as dist
 from torch.distributed.elastic.multiprocessing.errors import record
 
-from unet import UnetModel
-from diffusion import Diffusion
-from datasets import load_sat25k
-from train_utils import Trainer
-from globals import Globals
-from logger import DistributedLogger
-from typing import Optional, Union
-from utils import seed_all
+from syn10_diffusion.unet import UnetModel
+from syn10_diffusion.diffusion import Diffusion
+from syn10_diffusion.sat25k import load_sat25k
+from syn10_diffusion.train_utils import Trainer
+from syn10_diffusion.globals import Globals
+from syn10_diffusion.logger import DistributedLogger
+from syn10_diffusion.utils import seed_all, parse_config
 
 seed_all()
-
-
-def parse_config(config_path: Optional[str]):
-    if config_path is None:
-        return {}
-    if not Path(config_path).exists():
-        raise FileNotFoundError(f"Config file {config_path} not found")
-    with open(config_path, 'r') as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
-    return config
 
 
 def resolve_params(parser_args, config):

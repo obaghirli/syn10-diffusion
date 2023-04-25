@@ -5,8 +5,8 @@ from torch.nn.utils import clip_grad_norm_
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 import numpy as np
 from pathlib import Path
-from logger import DistributedLogger, TBSummaryWriter
-from utils import seed_all
+from syn10_diffusion.logger import DistributedLogger, TBSummaryWriter
+from syn10_diffusion.utils import seed_all
 
 seed_all()
 
