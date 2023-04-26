@@ -8,14 +8,13 @@ import torch.distributed as dist
 from torch.distributed.elastic.multiprocessing.errors import record
 import numpy as np
 
-from syn10_diffusion.unet import UnetModel
 from syn10_diffusion.diffusion import Diffusion
 from syn10_diffusion.sat25k import load_sat25k
 from syn10_diffusion.globals import Globals
 from syn10_diffusion.logger import DistributedLogger
-from syn10_diffusion.utils import seed_all, parse_config
+from syn10_diffusion import utils
 
-seed_all()
+utils.seed_all()
 
 
 def resolve_params(parser_args, config):
@@ -50,10 +49,11 @@ def main():
     parser.add_argument("--model_path", help="path to model file", type=str, required=True)
     parser.add_argument("--data_dir", help="path to data directory", type=str, required=True)
     parser.add_argument("--artifact_dir", help="path to output directory", type=str, required=True)
+    parser.add_argument("--test_model", help="test model to use, debug mode", type=str)
 
     parser_args = parser.parse_args()
     validate_args(parser_args)
-    config = parse_config(parser_args.config)
+    config = utils.parse_config(parser_args.config)
     params = resolve_params(parser_args, config)
     _globals = Globals()
     _globals.params = params
@@ -85,7 +85,10 @@ def main():
     diffusion = Diffusion(**params)
 
     logger.log_info("Loading model")
-    model = UnetModel(**params).to(local_rank)
+    model_classes = utils.get_models()
+    model_class = model_classes[params["test_model"]] \
+        if params["test_model"] is not None else model_classes["prod"]
+    model = model_class(**params).to(local_rank)
     model.eval()
     model_checkpoint = torch.load(Path(params['model_path']), map_location=f"cuda:{local_rank}")
     model.load_state_dict(model_checkpoint['model_state_dict'])

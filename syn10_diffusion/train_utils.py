@@ -6,9 +6,9 @@ from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 import numpy as np
 from pathlib import Path
 from syn10_diffusion.logger import DistributedLogger, TBSummaryWriter
-from syn10_diffusion.utils import seed_all
+from syn10_diffusion import utils
 
-seed_all()
+utils.seed_all()
 
 
 class Trainer:

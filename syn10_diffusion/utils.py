@@ -2,6 +2,8 @@ from typing import Optional
 from pathlib import Path
 import yaml
 
+from syn10_diffusion import models
+
 
 def seed_all(seed=313):
     """
@@ -35,3 +37,10 @@ def parse_config(config_path: Optional[str]):
     with open(config_path, 'r') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
     return config
+
+
+def get_models():
+    return {
+        "UnetTest": models.UnetTest,
+        "prod": models.UnetProd
+    }
