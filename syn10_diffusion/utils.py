@@ -2,8 +2,6 @@ from typing import Optional
 from pathlib import Path
 import yaml
 
-from syn10_diffusion import models
-
 
 def seed_all(seed=313):
     """
@@ -40,6 +38,7 @@ def parse_config(config_path: Optional[str]):
 
 
 def get_models():
+    from syn10_diffusion import models
     return {
         "UnetTest": models.UnetTest,
         "prod": models.UnetProd

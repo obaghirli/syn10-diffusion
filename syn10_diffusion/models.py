@@ -37,7 +37,7 @@ class Downsample(nn.Module):
         return x
 
 
-class ResnetBlock(nn.Module):
+class ResnetEncoderBlock(nn.Module):
     def __init__(self, in_channels, out_channels, emb_channels, dropout):
         super().__init__()
 
@@ -72,6 +72,72 @@ class ResnetBlock(nn.Module):
             proj = proj[..., None]
         scale, shift = torch.chunk(proj, 2, dim=1)
         h = self.out_norm(h) * (1.0 + scale) + shift
+        h = self.out_rest(h)
+        return h + self.skip_connection(x)
+
+
+class SPADE(nn.Module):
+    def __init__(self, in_channels, segmap_channels, segmap_emb_channels):
+        super().__init__()
+        self.norm = nn.GroupNorm(32, in_channels, affine=False)
+        self.shared = nn.Sequential(
+            nn.Conv2d(segmap_channels, segmap_emb_channels, kernel_size=3, padding=1),
+            nn.SiLU()
+        )
+        self.conv_gamma = nn.Conv2d(segmap_emb_channels, in_channels, kernel_size=3, padding=1)
+        self.conv_beta = nn.Conv2d(segmap_emb_channels, in_channels, kernel_size=3, padding=1)
+
+    def forward(self, x, segmap):
+        x = self.norm(x)
+        segmap = F.interpolate(segmap, size=x.shape[2:], mode='nearest')
+        segmap = self.shared(segmap)
+        gamma = self.conv_gamma(segmap)
+        beta = self.conv_beta(segmap)
+        return x * (1.0 + gamma) + beta
+
+
+class ResnetDecoderBlock(nn.Module):
+    def __init__(
+            self,
+            in_channels,
+            out_channels,
+            segmap_channels,
+            segmap_emb_channels,
+            t_emb_channels,
+            dropout
+    ):
+        super().__init__()
+        self.in_layes = nn.Sequential(
+            SPADE(in_channels, segmap_channels, segmap_emb_channels),
+            nn.SiLU(),
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        )
+
+        self.embed_layers = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(t_emb_channels, 2 * out_channels)
+        )
+
+        self.out_norm = SPADE(out_channels, segmap_channels, segmap_emb_channels)
+        self.out_rest = nn.Sequential(
+            nn.SiLU(),
+            nn.Dropout(p=dropout),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        )
+
+        if in_channels != out_channels:
+            self.skip_connection = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+        else:
+            self.skip_connection = nn.Identity()
+
+    def forward(self, x, emb, segmap):
+        h = x
+        h = self.in_layers(h, segmap)
+        proj = self.embed_layers(emb)
+        while len(proj.shape) < len(h.shape):
+            proj = proj[..., None]
+        scale, shift = torch.chunk(proj, 2, dim=1)
+        h = self.out_norm(h, segmap) * (1.0 + scale) + shift
         h = self.out_rest(h)
         return h + self.skip_connection(x)
 

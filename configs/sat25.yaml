@@ -10,6 +10,7 @@ s: 0.008
 lambda_variational: 0.001
 model_in_ch: 3
 model_out_ch: 6
+model_base_ch: 128
 lr: 0.0001
 grad_clip: 1.0
 train_batch_size: 4
