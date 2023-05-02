@@ -105,7 +105,7 @@ def main():
             model_kwargs={
                 'y': y,
                 'guidance': params['guidance'],
-                'model_out_ch': params['model_out_ch']
+                'model_output_channels': params['model_output_channels']
             }
         )
         sample = (sample + 1.0) / 2.0 * (params['image_max_value'] - params['image_min_value']) \

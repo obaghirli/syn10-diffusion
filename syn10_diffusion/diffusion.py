@@ -192,7 +192,7 @@ class Diffusion:
         device = next(model.parameters()).device
         y = model_kwargs['y']
         guidance = model_kwargs['guidance']
-        g_ch = model_kwargs['model_out_ch'] // 2
+        g_ch = model_kwargs['model_output_channels'] // 2
 
         x = torch.randn(*shape).to(device)
         n = x.shape[0]
