@@ -255,6 +255,7 @@ class UnetProd(nn.Module):
             self.encoder.append(level_module)
 
         assert resnet_in_channels is not None and resnet_out_channels is not None
+        assert resnet_in_channels == resnet_out_channels
 
         segmap_channels = 1 if self.num_classes == 2 else self.num_classes
         segmap_emb_channels = int(self.model_channels * self.y_embed_mult)
@@ -281,6 +282,44 @@ class UnetProd(nn.Module):
                 dropout=self.dropout
             )
         ])
+
+        self.decoder = nn.ModuleList()
+        for i_level in reversed(range(self.num_resolutions)):
+            level_module = nn.Module()
+            level_module.resnet_blocks = nn.ModuleList()
+            level_module.attn_blocks = nn.ModuleList()
+            level_module.upsample = None
+
+            resnet_out_channels = self.model_channels * self.channel_mult[i_level]
+            skip_channels = self.model_channels * self.channel_mult[i_level]
+
+            for i_resnet_block in range(self.num_resnet_blocks + 1):
+                if i_resnet_block == self.num_resnet_blocks:
+                    skip_channels = self.model_channels * self.in_channel_mult[i_level]
+                level_module.resnet_blocks.append(
+                    ResnetDecoderBlock(
+                        in_channels=skip_channels + resnet_in_channels,
+                        out_channels=resnet_out_channels,
+                        segmap_channels=segmap_channels,
+                        segmap_emb_channels=segmap_emb_channels,
+                        t_emb_channels=time_embed_dim,
+                        dropout=self.dropout
+                    )
+                )
+                if curr_resolution in self.attn_resolutions:
+                    level_module.attn_blocks.append(
+                        AttnBlock(
+                            in_channels=resnet_out_channels,
+                            head_channels=self.head_channels
+                        )
+                    )
+                resnet_in_channels = resnet_out_channels
+            if i_level != 0:
+                level_module.upsample = Upsample(
+                    channels=resnet_out_channels
+                )
+                curr_resolution *= 2
+            self.decoder.append(level_module)
 
         self.out_layers = nn.Sequential(
             nn.GroupNorm(32, self.model_channels),
