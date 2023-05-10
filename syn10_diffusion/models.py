@@ -10,6 +10,7 @@ def get_timestep_embeddings(timesteps, embedding_dim, max_period=10_000):
     assert embedding_dim % 2 == 0
     half_dim = embedding_dim // 2
     freqs = torch.exp(-torch.log(torch.tensor(max_period)) * torch.arange(half_dim) / (half_dim - 1))
+    freqs = freqs.to(device=timesteps.device)
     angles = timesteps[..., None].float() * freqs[None, ...]
     timestep_embeddings = torch.cat((torch.cos(angles), torch.sin(angles)), dim=1)
     assert timestep_embeddings.shape == (timesteps.shape[0], embedding_dim)
@@ -38,11 +39,11 @@ class Downsample(nn.Module):
 
 
 class ResnetEncoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, emb_channels, dropout):
+    def __init__(self, in_channels, out_channels, emb_channels, dropout, nc):
         super().__init__()
 
         self.in_layers = nn.Sequential(
-            nn.GroupNorm(32, in_channels),
+            nn.GroupNorm(nc, in_channels),
             nn.SiLU(),
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
         )
@@ -52,7 +53,7 @@ class ResnetEncoderBlock(nn.Module):
             nn.Linear(emb_channels, 2 * out_channels),
         )
 
-        self.out_norm = nn.GroupNorm(32, out_channels)
+        self.out_norm = nn.GroupNorm(nc, out_channels)
         self.out_rest = nn.Sequential(
             nn.SiLU(),
             nn.Dropout(p=dropout),
@@ -77,9 +78,9 @@ class ResnetEncoderBlock(nn.Module):
 
 
 class SPADE(nn.Module):
-    def __init__(self, in_channels, segmap_channels, segmap_emb_channels):
+    def __init__(self, in_channels, segmap_channels, segmap_emb_channels, nc):
         super().__init__()
-        self.norm = nn.GroupNorm(32, in_channels, affine=False)
+        self.norm = nn.GroupNorm(nc, in_channels, affine=False)
         self.shared = nn.Sequential(
             nn.Conv2d(segmap_channels, segmap_emb_channels, kernel_size=3, padding=1),
             nn.SiLU()
@@ -104,11 +105,12 @@ class ResnetDecoderBlock(nn.Module):
             segmap_channels,
             segmap_emb_channels,
             t_emb_channels,
-            dropout
+            dropout,
+            nc
     ):
         super().__init__()
-        self.in_layes = nn.Sequential(
-            SPADE(in_channels, segmap_channels, segmap_emb_channels),
+        self.in_norm = SPADE(in_channels, segmap_channels, segmap_emb_channels, nc)
+        self.in_rest = nn.Sequential(
             nn.SiLU(),
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
         )
@@ -118,7 +120,7 @@ class ResnetDecoderBlock(nn.Module):
             nn.Linear(t_emb_channels, 2 * out_channels)
         )
 
-        self.out_norm = SPADE(out_channels, segmap_channels, segmap_emb_channels)
+        self.out_norm = SPADE(out_channels, segmap_channels, segmap_emb_channels, nc)
         self.out_rest = nn.Sequential(
             nn.SiLU(),
             nn.Dropout(p=dropout),
@@ -132,7 +134,9 @@ class ResnetDecoderBlock(nn.Module):
 
     def forward(self, x, emb, segmap):
         h = x
-        h = self.in_layers(h, segmap)
+        h = self.in_norm(h, segmap)
+        h = self.in_rest(h)
+
         proj = self.embed_layers(emb)
         while len(proj.shape) < len(h.shape):
             proj = proj[..., None]
@@ -143,13 +147,13 @@ class ResnetDecoderBlock(nn.Module):
 
 
 class AttnBlock(nn.Module):
-    def __init__(self, in_channels, head_channels):
+    def __init__(self, in_channels, head_channels, nc):
         super().__init__()
         self.in_channels = in_channels
         self.head_channels = head_channels
         self.num_heads = in_channels // head_channels
 
-        self.norm = nn.GroupNorm(32, in_channels)
+        self.norm = nn.GroupNorm(nc, in_channels)
         self.proj_in = nn.Conv1d(in_channels, 3 * in_channels, kernel_size=1)
         self.proj_out = nn.Conv1d(in_channels, in_channels, kernel_size=1)
 
@@ -175,18 +179,76 @@ class AttnBlock(nn.Module):
 class UnetTest(nn.Module):
     def __init__(self, **kwargs):
         super().__init__()
-        self.in_channels = kwargs['model_input_channels']
-        self.out_channels = kwargs['model_output_channels']
-        self.nn.Conv2d = nn.Conv2d(
-            self.in_channels,
-            self.out_channels,
-            kernel_size=3,
-            padding=1
+        self.model_in_channels = kwargs['model_input_channels']
+        self.model_out_channels = kwargs['model_output_channels']
+        self.model_channels = kwargs['model_channels']
+        self.model_resolution = kwargs['image_size']
+        self.num_resnet_blocks = kwargs['num_resnet_blocks']
+        self.channel_mult = kwargs['channel_mult']
+        self.in_channel_mult = [1] + self.channel_mult
+        self.num_resolutions = len(self.channel_mult)
+        self.t_embed_mult = kwargs['t_embed_mult']
+        self.y_embed_mult = kwargs['y_embed_mult']
+        self.num_classes = kwargs['num_classes']
+        self.attn_resolutions = kwargs['attn_resolutions']
+        self.head_channels = kwargs['head_channels']
+        self.dropout = kwargs['dropout']
+        self.norm_channels = kwargs['norm_channels']
+
+        self.in_conv = nn.Sequential(
+            nn.Conv2d(self.model_in_channels, self.model_channels, kernel_size=3, padding=1)
+        )
+
+        time_embed_dim = int(self.model_channels * self.t_embed_mult)
+        self.time_embed = nn.Sequential(
+            nn.Linear(self.model_channels, time_embed_dim),
+            nn.SiLU(),
+            nn.Linear(time_embed_dim, time_embed_dim)
+        )
+
+        resnet_in_channels, resnet_out_channels = self.model_channels, self.model_channels
+        self.encoder_resnet_block_1 = ResnetEncoderBlock(
+                        in_channels=resnet_in_channels,
+                        out_channels=resnet_out_channels,
+                        emb_channels=time_embed_dim,
+                        dropout=self.dropout,
+                        nc=self.norm_channels
+                    )
+        self.attn_1 = AttnBlock(
+            in_channels=resnet_out_channels,
+            head_channels=self.head_channels,
+            nc=self.norm_channels
+        )
+
+        segmap_channels = self.num_classes
+        segmap_emb_channels = int(self.model_channels * self.y_embed_mult)
+        self.decoder_resnet_block_1 = ResnetDecoderBlock(
+                in_channels=resnet_out_channels,
+                out_channels=resnet_out_channels,
+                segmap_channels=segmap_channels,
+                segmap_emb_channels=segmap_emb_channels,
+                t_emb_channels=time_embed_dim,
+                dropout=self.dropout,
+                nc=self.norm_channels
+            )
+
+        self.out_layers = nn.Sequential(
+            nn.GroupNorm(self.norm_channels, self.model_channels),
+            nn.SiLU(),
+            nn.Conv2d(self.model_channels, self.model_out_channels, kernel_size=3, padding=1)
         )
 
     def forward(self, x, t, y):
-        x = self.nn.Conv2d(x)
-        return x
+        temb = get_timestep_embeddings(t, self.model_channels)
+        temb = self.time_embed(temb)
+
+        h = self.in_conv(x)
+        h = self.encoder_resnet_block_1(h, temb)
+        h = self.attn_1(h)
+        h = self.decoder_resnet_block_1(h, temb, y)
+
+        out = self.out_layers(h)
+        return out
 
 
 class UnetProd(nn.Module):
@@ -206,6 +268,7 @@ class UnetProd(nn.Module):
         self.attn_resolutions = kwargs['attn_resolutions']
         self.head_channels = kwargs['head_channels']
         self.dropout = kwargs['dropout']
+        self.norm_channels = kwargs['norm_channels']
 
         self.in_conv = nn.Sequential(
             nn.Conv2d(self.model_in_channels, self.model_channels, kernel_size=3, padding=1)
@@ -236,14 +299,16 @@ class UnetProd(nn.Module):
                         in_channels=resnet_in_channels,
                         out_channels=resnet_out_channels,
                         emb_channels=time_embed_dim,
-                        dropout=self.dropout
+                        dropout=self.dropout,
+                        nc=self.norm_channels
                     )
                 )
                 if curr_resolution in self.attn_resolutions:
                     level_module.attn_blocks.append(
                         AttnBlock(
                             in_channels=resnet_out_channels,
-                            head_channels=self.head_channels
+                            head_channels=self.head_channels,
+                            nc=self.norm_channels
                         )
                     )
                 resnet_in_channels = resnet_out_channels
@@ -257,31 +322,34 @@ class UnetProd(nn.Module):
         assert resnet_in_channels is not None and resnet_out_channels is not None
         assert resnet_in_channels == resnet_out_channels
 
-        segmap_channels = 1 if self.num_classes == 2 else self.num_classes
+        segmap_channels = self.num_classes
         segmap_emb_channels = int(self.model_channels * self.y_embed_mult)
 
-        self.middle = nn.ModuleList([
-            ResnetDecoderBlock(
+        self.middle = nn.ModuleDict({
+            "resnet_decoder_block_1": ResnetDecoderBlock(
                 in_channels=resnet_out_channels,
                 out_channels=resnet_out_channels,
                 segmap_channels=segmap_channels,
                 segmap_emb_channels=segmap_emb_channels,
                 t_emb_channels=time_embed_dim,
-                dropout=self.dropout
+                dropout=self.dropout,
+                nc=self.norm_channels
             ),
-            AttnBlock(
+            "attn_block": AttnBlock(
                 in_channels=resnet_out_channels,
-                head_channels=self.head_channels
+                head_channels=self.head_channels,
+                nc=self.norm_channels
             ),
-            ResnetDecoderBlock(
+            "resnet_decoder_block_2": ResnetDecoderBlock(
                 in_channels=resnet_out_channels,
                 out_channels=resnet_out_channels,
                 segmap_channels=segmap_channels,
                 segmap_emb_channels=segmap_emb_channels,
                 t_emb_channels=time_embed_dim,
-                dropout=self.dropout
+                dropout=self.dropout,
+                nc=self.norm_channels
             )
-        ])
+        })
 
         self.decoder = nn.ModuleList()
         for i_level in reversed(range(self.num_resolutions)):
@@ -303,14 +371,16 @@ class UnetProd(nn.Module):
                         segmap_channels=segmap_channels,
                         segmap_emb_channels=segmap_emb_channels,
                         t_emb_channels=time_embed_dim,
-                        dropout=self.dropout
+                        dropout=self.dropout,
+                        nc=self.norm_channels
                     )
                 )
                 if curr_resolution in self.attn_resolutions:
                     level_module.attn_blocks.append(
                         AttnBlock(
                             in_channels=resnet_out_channels,
-                            head_channels=self.head_channels
+                            head_channels=self.head_channels,
+                            nc=self.norm_channels
                         )
                     )
                 resnet_in_channels = resnet_out_channels
@@ -319,22 +389,50 @@ class UnetProd(nn.Module):
                     channels=resnet_out_channels
                 )
                 curr_resolution *= 2
-            self.decoder.append(level_module)
+            self.decoder.insert(0, level_module)
 
         self.out_layers = nn.Sequential(
-            nn.GroupNorm(32, self.model_channels),
+            nn.GroupNorm(self.norm_channels, self.model_channels),
             nn.SiLU(),
             nn.Conv2d(self.model_channels, self.model_out_channels, kernel_size=3, padding=1)
         )
 
     def forward(self, x, t, y):
-        emb = get_timestep_embeddings(t, self.model_channels)
-        emb = self.time_embed(emb)
+        temb = get_timestep_embeddings(t, self.model_channels)
+        temb = self.time_embed(temb)
 
         hs = [self.in_conv(x)]
+        for i_level in range(self.num_resolutions):
+            for i_block in range(self.num_resnet_blocks):
+                h = self.encoder[i_level].resnet_blocks[i_block](hs[-1], temb)
+                if len(self.encoder[i_level].attn_blocks) > 0:
+                    h = self.encoder[i_level].attn_blocks[i_block](h)
+                hs.append(h)
+            if self.encoder[i_level].downsample is not None:
+                hs.append(self.encoder[i_level].downsample(hs[-1]))
 
+        h = self.middle["resnet_decoder_block_1"](hs[-1], temb, y)
+        h = self.middle["attn_block"](h)
+        h = self.middle["resnet_decoder_block_2"](h, temb, y)
 
+        for i_level in reversed(range(self.num_resolutions)):
+            for i_block in range(self.num_resnet_blocks + 1):
+                h = self.decoder[i_level].resnet_blocks[i_block](
+                    torch.cat([h, hs.pop()], dim=1),
+                    temb,
+                    y
+                )
+                if len(self.decoder[i_level].attn_blocks) > 0:
+                    h = self.decoder[i_level].attn_blocks[i_block](h)
+            if self.decoder[i_level].upsample is not None:
+                h = self.decoder[i_level].upsample(h)
 
-        out = self.out_layers(x)
+        out = self.out_layers(h)
         return out
 
+
+def get_models():
+    return {
+        "UnetTest": UnetTest,
+        "prod": UnetProd
+    }

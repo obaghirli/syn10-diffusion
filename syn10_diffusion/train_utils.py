@@ -23,6 +23,7 @@ class Trainer:
         self.run_dir = Path(params['artifact_dir']) / self.run_id
         self.num_epochs = params['num_epochs']
         self.grad_clip = params['grad_clip']
+        self.p_uncond = params['p_uncond']
         self.checkpoint_freq = params['checkpoint_freq']
         self.tensorboard_freq = params['tensorboard_freq']
         self.step = 0
@@ -82,8 +83,12 @@ class Trainer:
 
         for epoch in range(self.start_epoch, self.num_epochs):
             for i, (x, y) in enumerate(self.data):
+                print(f"Rank: {self.rank}, batch size: {x.shape[0]}, epoch: {epoch}, step: {self.step}", end='\r')
                 x, y = map(lambda tensor: tensor.to(self.local_rank), (x, y))
                 n = x.shape[0]
+                mask = torch.rand(size=(n, 1, 1, 1), device=y.device) >= self.p_uncond
+                y = y * mask.float()
+
                 t = torch.from_numpy(np.random.choice(len(self.diffusion.betas), size=(n,))).long().to(self.local_rank)
 
                 loss_terms = self.diffusion.training_losses(self.ddp_model, x, t, model_kwargs={'y': y})
@@ -106,7 +111,6 @@ class Trainer:
 
                 self.optimizer.step()
                 self.step += 1
-                print(f"epoch: {epoch}, step: {self.step}", end='\r')
 
                 if self.step % self.checkpoint_freq == 0 and self.rank == 0:
                     self.save_checkpoint(self.step, epoch)
@@ -128,4 +132,3 @@ class Trainer:
                     avg_mse_loss.zero_()
                     avg_vlb_loss.zero_()
                 dist.barrier()
-

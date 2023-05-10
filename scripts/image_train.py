@@ -8,6 +8,7 @@ from torch.distributed.elastic.multiprocessing.errors import record
 
 from syn10_diffusion.diffusion import Diffusion
 from syn10_diffusion.sat25k import load_sat25k
+from syn10_diffusion import models
 from syn10_diffusion.train_utils import Trainer
 from syn10_diffusion.globals import Globals
 from syn10_diffusion.logger import DistributedLogger
@@ -30,6 +31,10 @@ def validate_args(parser_args):
     not_parser_resume_step = parser_args.resume_step is None
     if not_parser_run_id ^ not_parser_resume_step:
         raise RuntimeError("Both run_id and resume_step must be specified to resume training")
+    if parser_args.test_model is not None:
+        if parser_args.test_model not in models.get_models().keys():
+            raise ValueError(f"Unknown test model {parser_args.test_model}. "
+                             f"Available test models: {list(set(models.get_models().keys()) - set('prod'))}")
 
 
 def setup_directories(params):
@@ -53,6 +58,7 @@ def main():
     parser_args = parser.parse_args()
     validate_args(parser_args)
     config = utils.parse_config(parser_args.config)
+    utils.validate_config(config)
     params = resolve_params(parser_args, config)
     _globals = Globals()
     _globals.params = params
@@ -85,7 +91,7 @@ def main():
     diffusion = Diffusion(**params)
 
     logger.log_info("Creating model")
-    model_classes = utils.get_models()
+    model_classes = models.get_models()
     model_class = model_classes[params['test_model']] \
         if params['test_model'] is not None else model_classes["prod"]
     logger.log_info(f"Using model: {model_class.__name__}")

@@ -1,5 +1,5 @@
-image_size: 128
-image_channels: 3
+image_size: 64
+image_channels: 1
 image_max_value: 255
 image_min_value: 0
 num_classes: 2
@@ -8,22 +8,22 @@ num_diffusion_timesteps: 1000
 max_beta: 0.999
 s: 0.008
 lambda_variational: 0.001
+model_channels: 64
 norm_channels: 32
-model_input_channels: 3
-model_output_channels: 6
-model_channels: 128
+head_channels: 32
+t_embed_mult: 2
+y_embed_mult: 0.5
+model_input_channels: 1
+model_output_channels: 2
 channel_mult: [1, 2, 4]
 num_resnet_blocks: 2
-attn_resolutions: [32, ]
-head_channels: 32
-t_embed_mult: 4
-y_embed_mult: 0.5
+attn_resolutions: [32, 16]
 dropout: 0.0
 lr: 0.0001
 grad_clip: 1.0
-train_batch_size: 4
-sample_batch_size: 4
+train_batch_size: 8
+sample_batch_size: 1
 checkpoint_freq: 100
 tensorboard_freq: 100
-guidance: 1.5
+guidance: 3.5
 p_uncond: 0.2

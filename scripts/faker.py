@@ -56,7 +56,8 @@ def generate(data_dir: str, n_samples: int, sample: np.ndarray, label: np.ndarra
                 scale_limit=0.1,
                 rotate_limit=45,
                 p=1.0,
-                border_mode=cv2.BORDER_CONSTANT, value=0
+                border_mode=cv2.BORDER_CONSTANT,
+                value=0
             )
         ]
     )
@@ -79,6 +80,8 @@ def main():
     parser = argparse.ArgumentParser(description="Faker")
     parser.add_argument("--config", help="path to config file", type=str, required=True)
     parser.add_argument("--data_dir", help="path to data directory", type=str, required=True)
+    parser.add_argument("--num_train_samples", help="number of training samples", type=int, required=True)
+    parser.add_argument("--num_val_samples", help="number of validation samples", type=int, required=True)
     parser_args = parser.parse_args()
     config = parse_config(parser_args.config)
 
@@ -94,8 +97,21 @@ def main():
     label[object_location:object_location+object_size, object_location:object_location+object_size] = 1
     label = label.astype(np.uint8)
 
-    generate(data_dir=parser_args.data_dir, n_samples=100, sample=sample, label=label, is_train=True,)
-    generate(data_dir=parser_args.data_dir, n_samples=20, sample=sample, label=label, is_train=False)
+    generate(
+        data_dir=parser_args.data_dir,
+        n_samples=parser_args.num_train_samples,
+        sample=sample,
+        label=label,
+        is_train=True
+    )
+
+    generate(
+        data_dir=parser_args.data_dir,
+        n_samples=parser_args.num_val_samples,
+        sample=sample,
+        label=label,
+        is_train=False
+    )
 
 
 if __name__ == "__main__":

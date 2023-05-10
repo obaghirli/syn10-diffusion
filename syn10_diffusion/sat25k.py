@@ -72,13 +72,10 @@ class SAT25K(Dataset):
     def process_annotation(self, annotation: np.ndarray):
         assert annotation.shape == (self.image_size, self.image_size), annotation.shape
         assert np.issubdtype(annotation.dtype, np.integer), annotation.dtype
-        annotation_one_hot = np.zeros((self.num_classes, self.image_size, self.image_size))
+        annotation_one_hot = np.zeros((self.num_classes, self.image_size, self.image_size), dtype=np.float32)
         for i in range(self.num_classes):
             annotation_one_hot[i, :, :] = np.where(annotation == i, 1.0, 0.0)
         assert annotation_one_hot.shape == (self.num_classes, self.image_size, self.image_size), annotation_one_hot.shape
-        if self.num_classes == 2:
-            annotation_one_hot = annotation_one_hot[self.num_classes - 1, ...][None, ...]
-            assert annotation_one_hot.shape == (1, self.image_size, self.image_size), annotation_one_hot.shape
         return annotation_one_hot
 
 

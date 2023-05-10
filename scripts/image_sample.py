@@ -10,6 +10,7 @@ import numpy as np
 
 from syn10_diffusion.diffusion import Diffusion
 from syn10_diffusion.sat25k import load_sat25k
+from syn10_diffusion import models
 from syn10_diffusion.globals import Globals
 from syn10_diffusion.logger import DistributedLogger
 from syn10_diffusion import utils
@@ -29,6 +30,10 @@ def resolve_params(parser_args, config):
 def validate_args(parser_args):
     if not Path(parser_args.model_path).exists():
         raise FileNotFoundError(f"Model file {parser_args.model_path} not found")
+    if parser_args.test_model is not None:
+        if parser_args.test_model not in models.get_models().keys():
+            raise ValueError(f"Unknown test model {parser_args.test_model}. "
+                             f"Available test models: {list(set(models.get_models().keys()) - set('prod'))}")
 
 
 def setup_directories(params):
@@ -54,6 +59,7 @@ def main():
     parser_args = parser.parse_args()
     validate_args(parser_args)
     config = utils.parse_config(parser_args.config)
+    utils.validate_config(config)
     params = resolve_params(parser_args, config)
     _globals = Globals()
     _globals.params = params
@@ -85,9 +91,10 @@ def main():
     diffusion = Diffusion(**params)
 
     logger.log_info("Loading model")
-    model_classes = utils.get_models()
+    model_classes = models.get_models()
     model_class = model_classes[params["test_model"]] \
         if params["test_model"] is not None else model_classes["prod"]
+    logger.log_info(f"Using model: {model_class.__name__}")
     model = model_class(**params).to(local_rank)
     model.eval()
     model_checkpoint = torch.load(Path(params['model_path']), map_location=f"cuda:{local_rank}")
@@ -98,6 +105,7 @@ def main():
     all_labels = []
 
     for i, (x, y) in enumerate(data):
+        print(f"Rank: {rank}, batch size: {x.shape[0]}, i_batch: {i + 1}/{len(data)}", end='\r')
         y = y.to(local_rank)
         sample = diffusion.p_sample(
             model,
@@ -114,12 +122,11 @@ def main():
         sample = sample.permute(0, 2, 3, 1)
         sample = sample.contiguous()
 
-        if params['num_classes'] > 2:
-            classes = torch.arange(params['num_classes'], device=local_rank)
-            classes = classes.unsqueeze(0).unsqueeze(2).unsqueeze(3)
-            classes = classes.expand(y.shape)
-            y = (classes * y).sum(dim=1, keepdim=True)
-        y = y.to(torch.uint8)
+        classes = torch.arange(params['num_classes'], device=local_rank)
+        classes = classes.unsqueeze(0).unsqueeze(2).unsqueeze(3)
+        classes = classes.expand(y.shape)
+        y = (classes * y).sum(dim=1, keepdim=True)
+        y = y.type(torch.uint8)
         y = y.permute(0, 2, 3, 1)
         y = y.contiguous()
 
@@ -132,16 +139,21 @@ def main():
         all_labels.extend([labels.cpu().numpy() for labels in gathered_labels])
 
     if rank == 0:
-        logger.log_info("Saving samples")
+        save_path = Path(params['artifact_dir']) / params['run_id']
+        images_path = save_path / "images"
+        annotations_path = save_path / "annotations"
+        logger.log_info(f"Saving samples")
         arr = np.concatenate(all_samples, axis=0)
         label_arr = np.concatenate(all_labels, axis=0)
         for i in range(arr.shape[0]):
-            np.save(str(Path(params['artifact_dir']) / params['run_id'] / "images" / f"sample_{i}.npy"), arr[i])
-            np.save(str(Path(params['artifact_dir']) / params['run_id'] / "annotations" / f"label_{i}.npy"), label_arr[i])
+            print(f"Rank: {rank}, i_sample: {i + 1}/{len(arr)}", end='\r')
+            np.save(str(images_path / f"sample_{i}.npy"), arr[i])
+            np.save(str(annotations_path / f"label_{i}.npy"), label_arr[i])
+        logger.log_info("Sampling finished")
+        logger.log_info(f"Saved images to: {str(images_path.resolve())}")
+        logger.log_info(f"Saved annotations to: {str(annotations_path.resolve())}")
 
     dist.barrier()
-
-    logger.log_info("Sampling finished")
     dist.destroy_process_group()
 
 
