@@ -27,3 +27,5 @@ checkpoint_freq: 100
 tensorboard_freq: 100
 guidance: 1.5
 p_uncond: 0.2
+ema_decay: 0.9999
+ema_delay: 100000

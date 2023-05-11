@@ -75,6 +75,8 @@ def validate_config(config: dict):
     assert config["tensorboard_freq"] > 0
     assert config["sample_batch_size"] > 0
     assert config["guidance"] > 0.0
+    assert 0.0 < config["ema_decay"] < 1.0
+    assert config["ema_delay"] >= 0
     assert config["image_max_value"] > config["image_min_value"] >= 0
     assert config["num_classes"] > 1
     assert 1.0 > config["max_beta"] > 0.0

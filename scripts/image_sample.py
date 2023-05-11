@@ -99,6 +99,7 @@ def main():
     model.eval()
     model_checkpoint = torch.load(Path(params['model_path']), map_location=f"cuda:{local_rank}")
     model.load_state_dict(model_checkpoint['model_state_dict'])
+    logger.log_info(f"Loaded model from: {Path(params['model_path']).resolve()}")
 
     logger.log_info("Starting sampling")
     all_samples = []

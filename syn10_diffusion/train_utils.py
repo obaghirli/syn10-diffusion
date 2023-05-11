@@ -7,6 +7,7 @@ import numpy as np
 from pathlib import Path
 from syn10_diffusion.logger import DistributedLogger, TBSummaryWriter
 from syn10_diffusion import utils
+from syn10_diffusion.ema import EMA
 
 utils.seed_all()
 
@@ -28,6 +29,7 @@ class Trainer:
         self.tensorboard_freq = params['tensorboard_freq']
         self.step = 0
         self.start_epoch = 0
+        self.resume_step = None
 
         self.dlogger = DistributedLogger()
         self.tb_writer = TBSummaryWriter(log_dir=self.run_dir)
@@ -40,11 +42,22 @@ class Trainer:
         if params['resume_step'] is not None:
             self.load_optimizer_checkpoint(params['resume_step'])
 
-        self.ddp_model = DDP(
-            self.model,
-            device_ids=[self.local_rank],
-            output_device=self.local_rank
-        )
+        self.ddp_model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank)
+        self.ema = EMA(self.ddp_model, decay=params['ema_decay'], delay=params['ema_delay'])
+
+        if params['resume_step'] is not None and self.step >= self.ema.delay:
+            self.load_ema_checkpoint(params['resume_step'])
+
+        if params['resume_step'] is not None:
+            self.resume_step = params['resume_step']
+            self.step += 1
+
+    def load_ema_checkpoint(self, resume_step):
+        ema_chckpoint_path = self.run_dir / f"ema_checkpoint_{resume_step}.pt.tar"
+        if not ema_chckpoint_path.exists():
+            raise FileNotFoundError(f"EMA checkpoint {ema_chckpoint_path} does not exist")
+        ema_checkpoint = torch.load(ema_chckpoint_path, map_location=f"cuda:{self.local_rank}")
+        self.ema.load_state_dict(ema_checkpoint['model_state_dict'])
 
     def load_model_checkpoint(self, resume_step):
         model_checkpoint_path = self.run_dir / f"model_checkpoint_{resume_step}.pt.tar"
@@ -65,6 +78,7 @@ class Trainer:
     def save_checkpoint(self, step, epoch):
         model_checkpoint_path = self.run_dir / f"model_checkpoint_{step}.pt.tar"
         optimizer_checkpoint_path = self.run_dir / f"optimizer_checkpoint_{step}.pt.tar"
+        ema_checkpoint_path = self.run_dir / f"ema_checkpoint_{step}.pt.tar"
 
         torch.save({
             'model_state_dict': self.ddp_model.module.state_dict(),
@@ -76,6 +90,11 @@ class Trainer:
             'optimizer_state_dict': self.optimizer.state_dict()
         }, optimizer_checkpoint_path)
 
+        if step >= self.ema.delay:
+            torch.save({
+                'model_state_dict': self.ema.state_dict()
+            }, ema_checkpoint_path)
+
     def run(self):
         avg_loss = torch.zeros(1).to(self.local_rank)
         avg_mse_loss = torch.zeros(1).to(self.local_rank)
@@ -84,6 +103,9 @@ class Trainer:
         for epoch in range(self.start_epoch, self.num_epochs):
             for i, (x, y) in enumerate(self.data):
                 print(f"Rank: {self.rank}, batch size: {x.shape[0]}, epoch: {epoch}, step: {self.step}", end='\r')
+                if self.step == self.ema.delay:
+                    self.ema.build_shadow()
+
                 x, y = map(lambda tensor: tensor.to(self.local_rank), (x, y))
                 n = x.shape[0]
                 mask = torch.rand(size=(n, 1, 1, 1), device=y.device) >= self.p_uncond
@@ -110,11 +132,11 @@ class Trainer:
                     pass
 
                 self.optimizer.step()
-                self.step += 1
+                self.ema.step()
 
-                if self.step % self.checkpoint_freq == 0 and self.rank == 0:
+                if self.step % self.checkpoint_freq == 0 and self.rank == 0 and self.step > 0:
                     self.save_checkpoint(self.step, epoch)
-                if self.step % self.tensorboard_freq == 0 and self.rank == 0:
+                if self.step % self.tensorboard_freq == 0 and self.rank == 0 and self.step > 0:
                     dist.all_reduce(avg_loss, op=dist.ReduceOp.SUM)
                     dist.all_reduce(avg_mse_loss, op=dist.ReduceOp.SUM)
                     dist.all_reduce(avg_vlb_loss, op=dist.ReduceOp.SUM)
@@ -131,4 +153,5 @@ class Trainer:
                     avg_loss.zero_()
                     avg_mse_loss.zero_()
                     avg_vlb_loss.zero_()
+                self.step += 1
                 dist.barrier()

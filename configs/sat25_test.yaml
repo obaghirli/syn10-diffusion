@@ -16,14 +16,16 @@ y_embed_mult: 0.5
 model_input_channels: 1
 model_output_channels: 2
 channel_mult: [1, 2, 4]
-num_resnet_blocks: 2
+num_resnet_blocks: 1
 attn_resolutions: [32, 16]
 dropout: 0.0
 lr: 0.0001
 grad_clip: 1.0
-train_batch_size: 8
+train_batch_size: 4
 sample_batch_size: 1
 checkpoint_freq: 100
 tensorboard_freq: 100
 guidance: 3.5
 p_uncond: 0.2
+ema_decay: 0.99
+ema_delay: 100
