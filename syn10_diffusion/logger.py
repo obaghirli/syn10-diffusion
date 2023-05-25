@@ -2,20 +2,10 @@ import os
 import sys
 import logging
 from pathlib import Path
-from torch.utils.tensorboard import SummaryWriter
-from typing import Union
 from syn10_diffusion.globals import Globals
 from syn10_diffusion.utils import seed_all
 
 seed_all()
-
-
-class TBSummaryWriter(SummaryWriter):
-    def __init__(self, log_dir: Union[str, Path]):
-        if not isinstance(log_dir, Path):
-            log_dir = Path(log_dir)
-        self.log_dir = log_dir
-        super().__init__(log_dir=str(log_dir))
 
 
 class DistributedLogger:

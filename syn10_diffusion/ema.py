@@ -1,4 +1,7 @@
 from collections import OrderedDict
+from syn10_diffusion import utils
+
+utils.seed_all()
 
 
 class EMA:

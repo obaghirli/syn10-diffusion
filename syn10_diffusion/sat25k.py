@@ -11,7 +11,8 @@ seed_all()
 
 class SAT25K(Dataset):
     def __init__(
-            self, root_dir: Union[str, Path],
+            self,
+            root_dir: Union[str, Path],
             image_size: int,
             image_channels: int,
             image_max_value: int,

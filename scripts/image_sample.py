@@ -119,16 +119,13 @@ def main():
         )
         sample = (sample + 1.0) / 2.0 * (params['image_max_value'] - params['image_min_value']) \
             + params['image_min_value']
-        sample = sample.clamp(params['image_min_value'], params['image_max_value']).to(torch.uint8)
-        sample = sample.permute(0, 2, 3, 1)
+        sample = sample.clamp(params['image_min_value'], params['image_max_value'])
         sample = sample.contiguous()
 
         classes = torch.arange(params['num_classes'], device=local_rank)
         classes = classes.unsqueeze(0).unsqueeze(2).unsqueeze(3)
         classes = classes.expand(y.shape)
         y = (classes * y).sum(dim=1, keepdim=True)
-        y = y.type(torch.uint8)
-        y = y.permute(0, 2, 3, 1)
         y = y.contiguous()
 
         gathered_samples = [torch.zeros_like(sample) for _ in range(world_size)]
@@ -144,8 +141,8 @@ def main():
         images_path = save_path / "images"
         annotations_path = save_path / "annotations"
         logger.log_info(f"Saving samples")
-        arr = np.concatenate(all_samples, axis=0)
-        label_arr = np.concatenate(all_labels, axis=0)
+        arr = np.concatenate(all_samples, axis=0).astype(np.uint16)
+        label_arr = np.concatenate(all_labels, axis=0).astype(np.uint16)
         for i in range(arr.shape[0]):
             print(f"Rank: {rank}, i_sample: {i + 1}/{len(arr)}", end='\r')
             np.save(str(images_path / f"sample_{i}.npy"), arr[i])

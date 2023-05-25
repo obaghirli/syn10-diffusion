@@ -3,9 +3,11 @@ import torch
 import torch.distributed as dist
 from torch.nn.utils import clip_grad_norm_
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+from torch.utils.tensorboard import SummaryWriter
+import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
-from syn10_diffusion.logger import DistributedLogger, TBSummaryWriter
+from syn10_diffusion.logger import DistributedLogger
 from syn10_diffusion import utils
 from syn10_diffusion.ema import EMA
 
@@ -28,38 +30,47 @@ class Trainer:
         self.p_uncond = params['p_uncond']
         self.checkpoint_freq = params['checkpoint_freq']
         self.tensorboard_freq = params['tensorboard_freq']
+        self.eval_freq = params['eval_freq']
+        self.guidance = params['guidance']
+        self.model_output_channels = params['model_output_channels']
+        self.image_max_value = params['image_max_value']
+        self.image_min_value = params['image_min_value']
         self.step = 0
         self.local_step = 0
         self.start_epoch = 0
-
         self.dlogger = DistributedLogger()
-        self.tb_writer = TBSummaryWriter(log_dir=self.run_dir)
 
-        self.ddp_model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank)
-        if params['resume_step'] is not None:
-            self.load_model_checkpoint(params['resume_step'])
+        self.ddp_model = DDP(
+            self.model,
+            device_ids=[self.local_rank],
+            output_device=self.local_rank
+        )
 
         self.optimizer = torch.optim.AdamW(
             self.ddp_model.module.parameters(),
             lr=params['lr'],
             weight_decay=params['weight_decay']
         )
-        if params['resume_step'] is not None:
-            self.load_optimizer_checkpoint(params['resume_step'])
 
         self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
             self.optimizer,
             T_0=params['lr_scheduler_t_0'],
             T_mult=params['lr_scheduler_t_mult']
         )
+
+        self.ema = EMA(
+            self.ddp_model,
+            decay=params['ema_decay'],
+            delay=params['ema_delay']
+        )
+
         if params['resume_step'] is not None:
+            self.load_model_checkpoint(params['resume_step'])
+            self.load_optimizer_checkpoint(params['resume_step'])
             self.load_lr_scheduler_checkpoint(params['resume_step'])
+            if self.step >= self.ema.delay:
+                self.load_ema_checkpoint(params['resume_step'])
 
-        self.ema = EMA(self.ddp_model, decay=params['ema_decay'], delay=params['ema_delay'])
-        if params['resume_step'] is not None and self.step >= self.ema.delay:
-            self.load_ema_checkpoint(params['resume_step'])
-
-        if params['resume_step'] is not None:
             self.local_step += 1
             if self.local_step >= self.iters:
                 self.local_step = 0
@@ -123,22 +134,57 @@ class Trainer:
                 'model_state_dict': self.ema.state_dict()
             }, ema_checkpoint_path)
 
+    @torch.no_grad()
+    def compute_norms(self):
+        param_norm = 0.0
+        grad_norm = 0.0
+        for param in self.ddp_model.module.parameters():
+            if param.requires_grad:
+                param_norm += torch.linalg.vector_norm(param).item() ** 2
+                if param.grad is not None:
+                    grad_norm += torch.linalg.vector_norm(param.grad).item() ** 2
+        return np.sqrt(param_norm), np.sqrt(grad_norm)
+
+    @torch.no_grad()
+    def evaluate(self, x, y):
+        self.ddp_model.eval()
+        sample = self.diffusion.p_sample(
+            self.ddp_model.module,
+            x.shape,
+            model_kwargs={
+                'y': y,
+                'guidance': self.guidance,
+                'model_output_channels': self.model_output_channels
+            }
+        )
+        sample = (sample + 1.0) / 2.0
+        sample = sample.clamp(0.0, 1.0)
+        self.ddp_model.train()
+        return sample
+
     def run(self):
         avg_loss = torch.FloatTensor([0.]).to(self.local_rank)
         avg_mse_loss = torch.FloatTensor([0.]).to(self.local_rank)
         avg_vlb_loss = torch.FloatTensor([0.]).to(self.local_rank)
+        avg_kl_loss = torch.FloatTensor([0.]).to(self.local_rank)
+        avg_decoder_nll_loss = torch.FloatTensor([0.]).to(self.local_rank)
+        avg_var_signal = torch.FloatTensor([0.]).to(self.local_rank)
+        t_counter = torch.zeros((len(self.diffusion.betas),), dtype=torch.long).to(self.local_rank)
 
         for epoch in range(self.start_epoch, self.num_epochs):
             for i, (x, y) in enumerate(self.data, self.local_step):
                 if i == self.iters:
                     break
 
-                print(f"Rank: {self.rank}, "
-                      f"batch size: {x.shape[0]}, "
-                      f"i_batch: {i + 1}/{self.iters}, "
-                      f"epoch: {epoch}, "
-                      f"local_step: {i}, "
-                      f"step: {self.step}")
+                print(
+                    f"Rank: {self.rank}, "
+                    f"batch size: {x.shape[0]}, "
+                    f"i_batch: {i + 1}/{self.iters}, "
+                    f"epoch: {epoch}, "
+                    f"step: {self.step}, "
+                    f"local_step: {i}, "
+                    f"lr: {self.optimizer.param_groups[0]['lr']}"
+                )
 
                 if self.step == self.ema.delay:
                     self.ema.build_shadow()
@@ -149,16 +195,33 @@ class Trainer:
                 y = y * mask.float()
 
                 t = torch.from_numpy(np.random.choice(len(self.diffusion.betas), size=(n,))).long().to(self.local_rank)
+                t_counter[t] += 1
 
                 loss_terms = self.diffusion.training_losses(self.ddp_model, x, t, model_kwargs={'y': y})
 
                 loss = loss_terms['loss'].mean()
                 mse = loss_terms['mse'].mean()
                 vlb = loss_terms['vlb'].mean()
+                kl = loss_terms['kl'].mean()
+                decoder_nll = loss_terms['decoder_nll'].mean()
+                var_signal = loss_terms['var_signal'].mean()
+
+                print(
+                    f"Rank: {self.rank}, "
+                    f"loss: {loss}, "
+                    f"mse: {mse}, "
+                    f"vlb: {vlb}, "
+                    f"kl: {kl}, "
+                    f"decoder_nll: {decoder_nll}, "
+                    f"var_signal: {var_signal}"
+                )
 
                 avg_loss += loss.detach().clone() / self.tensorboard_freq
                 avg_mse_loss += mse.detach().clone() / self.tensorboard_freq
                 avg_vlb_loss += vlb.detach().clone() / self.tensorboard_freq
+                avg_kl_loss += kl.detach().clone() / self.tensorboard_freq
+                avg_decoder_nll_loss += decoder_nll.detach().clone() / self.tensorboard_freq
+                avg_var_signal += var_signal.detach().clone() / self.tensorboard_freq
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -178,20 +241,66 @@ class Trainer:
                     dist.all_reduce(avg_loss, op=dist.ReduceOp.SUM)
                     dist.all_reduce(avg_mse_loss, op=dist.ReduceOp.SUM)
                     dist.all_reduce(avg_vlb_loss, op=dist.ReduceOp.SUM)
+                    dist.all_reduce(avg_kl_loss, op=dist.ReduceOp.SUM)
+                    dist.all_reduce(avg_decoder_nll_loss, op=dist.ReduceOp.SUM)
+                    dist.all_reduce(avg_var_signal, op=dist.ReduceOp.SUM)
+                    t_counter_clone = t_counter.clone()
+                    dist.all_reduce(t_counter_clone, op=dist.ReduceOp.SUM)
                     avg_loss /= self.world_size
                     avg_mse_loss /= self.world_size
                     avg_vlb_loss /= self.world_size
-                    self.tb_writer.add_scalars(
-                        "train", {
-                            "avg_loss": avg_loss.item(),
-                            "avg_mse_loss": avg_mse_loss.item(),
-                            "avg_vlb_loss": avg_vlb_loss.item(),
-                            "lr": self.optimizer.param_groups[0]['lr']
-                        }, self.step
-                    )
+                    avg_kl_loss /= self.world_size
+                    avg_decoder_nll_loss /= self.world_size
+                    avg_var_signal /= self.world_size
+
+                    param_norm, grad_norm = self.compute_norms()
+
+                    with SummaryWriter(log_dir=self.run_dir) as tb_writer:
+                        tb_writer.add_scalar("avg_loss", avg_loss.item(), self.step)
+                        tb_writer.add_scalar("avg_mse_loss", avg_mse_loss.item(), self.step)
+                        tb_writer.add_scalar("avg_vlb_loss", avg_vlb_loss.item(), self.step)
+                        tb_writer.add_scalar("avg_kl_loss", avg_kl_loss.item(), self.step)
+                        tb_writer.add_scalar("avg_decoder_nll_loss", avg_decoder_nll_loss.item(), self.step)
+                        tb_writer.add_scalar("avg_var_signal", avg_var_signal.item(), self.step)
+                        tb_writer.add_scalar("lr", self.optimizer.param_groups[0]['lr'], self.step)
+                        tb_writer.add_scalar("param_norm", param_norm, self.step)
+                        tb_writer.add_scalar("grad_norm", grad_norm, self.step)
+                        tb_writer.add_figure("t_counter", t_counter_fig(t_counter_clone), self.step)
+
+                        with torch.no_grad():
+                            for name, param in self.ddp_model.module.named_parameters():
+                                if param.requires_grad:
+                                    tb_writer.add_histogram(name, param.detach().cpu().numpy(), self.step)
+
                     avg_loss.zero_()
                     avg_mse_loss.zero_()
                     avg_vlb_loss.zero_()
+                    avg_kl_loss.zero_()
+                    avg_decoder_nll_loss.zero_()
+                    avg_var_signal.zero_()
+
+                if self.step % self.eval_freq == 0 and self.rank == 0 and self.step > 0:
+                    print(f"Rank: {self.rank}, Evaluating...")
+                    sample = self.evaluate(x, y)
+                    if sample.shape[1] >= 3:
+                        sample = torch.narrow(sample, 1, 0, 3)
+                    else:
+                        sample = torch.narrow(sample, 1, 0, 1)
+                    with SummaryWriter(log_dir=self.run_dir) as tb_writer:
+                        tb_writer.add_images("sample", sample, self.step)
+
                 dist.barrier()
                 self.step += 1
             self.local_step = 0
+
+
+def t_counter_fig(t_counter):
+    fig, ax = plt.subplots()
+    x = t_counter.cpu().numpy()
+    bins = np.arange(np.floor(np.min(x)) - 0.5, np.ceil(np.max(x)) + 1.5)
+    counts, limits = np.histogram(x, bins=bins)
+    ax.bar(limits[:-1], counts, align='edge')
+    ax.set_xlabel('Timesteps')
+    ax.set_ylabel('Frequency')
+    ax.set_title('Frequency of timesteps')
+    return fig

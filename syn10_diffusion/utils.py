@@ -81,6 +81,7 @@ def validate_config(config: dict):
     assert config["train_batch_size"] > 0
     assert config["checkpoint_freq"] > 0
     assert config["tensorboard_freq"] > 0
+    assert config["eval_freq"] > 0
     assert config["sample_batch_size"] > 0
     assert config["guidance"] > 0.0
     assert 0.0 < config["ema_decay"] < 1.0

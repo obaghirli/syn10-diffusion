@@ -109,7 +109,6 @@ class Diffusion:
 
         Returns:  A tuple of tensors containing the mean, variance, and log_variance_clipped of q(x_{t-1} | x_t, x_0).
         """
-
         assert x_start.shape == x_t.shape
         assert t.shape == (x_start.shape[0],)
         q_posterior_mean = _slice(self.q_posterior_mean_coef_x0, t, x_start.shape) * x_start + \
@@ -169,17 +168,41 @@ class Diffusion:
         mse = torch.mean((noise - eps)**2, dim=list(range(1, noise.ndim)))
 
         # calculate vlb loss
-        q_posterior_dist = torch.distributions.normal.Normal(q_posterior_mean, torch.exp(0.5 * q_posterior_log_variance_clipped))
-        p_dist = torch.distributions.normal.Normal(p_mean, torch.exp(0.5 * p_log_variance))
-        kl = torch.mean(torch.distributions.kl.kl_divergence(q_posterior_dist, p_dist), dim=list(range(1, x_start.ndim)))  # nats
-        decoder_nll = torch.mean(-p_dist.log_prob(x_start), dim=list(range(1, x_start.ndim)))  # nats
+        q_posterior_dist = torch.distributions.normal.Normal(
+            q_posterior_mean,
+            torch.exp(0.5 * q_posterior_log_variance_clipped)
+        )
+
+        p_dist = torch.distributions.normal.Normal(
+            p_mean,
+            torch.exp(0.5 * p_log_variance)
+        )
+
+        kl = torch.mean(
+            torch.distributions.kl.kl_divergence(
+                q_posterior_dist,
+                p_dist
+            ), dim=list(range(1, x_start.ndim))
+        )  # nats
+
+        decoder_nll = torch.mean(
+            -discretized_gaussian_log_likelihood(
+                x_start,
+                means=p_mean,
+                log_scales=0.5 * p_log_variance
+            ), dim=list(range(1, x_start.ndim))
+        )  # nats
+
         vlb = torch.where((t == 0), decoder_nll, kl)
 
         total_loss = mse + self.lambda_variational * vlb
         terms = {
+            'loss': total_loss,
             'mse': mse,
             'vlb': vlb,
-            'loss': total_loss
+            'kl': kl,
+            'decoder_nll': decoder_nll,
+            'var_signal': torch.mean(var_signal.detach(), dim=list(range(1, var_signal.ndim)))
         }
         return terms
 
@@ -217,3 +240,27 @@ def _slice(arr: np.ndarray, timesteps: torch.Tensor, broadcast_shape: torch.Size
     while sliced_arr.ndim < len(broadcast_shape):
         sliced_arr = sliced_arr[..., np.newaxis]
     return sliced_arr.expand(broadcast_shape)
+
+
+def approx_standard_normal_cdf(x):
+    return 0.5 * (1.0 + torch.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * torch.pow(x, 3))))
+
+
+def discretized_gaussian_log_likelihood(x, *, means, log_scales):
+    assert x.shape == means.shape == log_scales.shape
+    centered_x = x - means
+    inv_stdv = torch.exp(-log_scales)
+    plus_in = inv_stdv * (centered_x + 1.0 / 255.0)
+    cdf_plus = approx_standard_normal_cdf(plus_in)
+    min_in = inv_stdv * (centered_x - 1.0 / 255.0)
+    cdf_min = approx_standard_normal_cdf(min_in)
+    log_cdf_plus = torch.log(cdf_plus.clamp(min=1e-12))
+    log_one_minus_cdf_min = torch.log((1.0 - cdf_min).clamp(min=1e-12))
+    cdf_delta = cdf_plus - cdf_min
+    log_probs = torch.where(
+        x < -0.999,
+        log_cdf_plus,
+        torch.where(x > 0.999, log_one_minus_cdf_min, torch.log(cdf_delta.clamp(min=1e-12))),
+    )
+    assert log_probs.shape == x.shape
+    return log_probs
