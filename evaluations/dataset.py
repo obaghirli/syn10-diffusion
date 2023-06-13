@@ -1,6 +1,6 @@
 import numpy as np
 from pathlib import Path
-from typing import Union, Optional
+from typing import Union, Optional, List
 from abc import ABC, abstractmethod
 
 import torch
@@ -209,6 +209,45 @@ def load_sam_dataset(
     )
     return loader
 
+
+def load_ss_image_dataset(
+        image_path: List[Path],
+        image_max_value: int,
+        image_min_value: int
+):
+    images = []
+    preprocess = transforms.Compose([
+        FIDTransform(
+            image_max_value=image_max_value,
+            image_min_value=image_min_value
+        )
+    ])
+    image_path = sorted(image_path)
+    for p in image_path:
+        image = np.load(str(p))
+        assert image.ndim == 3, f"Image must be 3D, got {image.ndim}D"
+        assert image.shape[0] == 3, f"Image must have 3 channels (channel first), got {image.shape[0]}"
+        assert np.issubdtype(image.dtype, np.integer), f"Image must be integer type, got {image.dtype}"
+        assert np.all(image >= image_min_value) and np.all(image <= image_max_value)
+        images.append(preprocess(image.astype(np.float32)))
+    images = torch.stack(images, dim=0)
+    return images
+
+
+def load_ss_search_dataset(
+        search_path: Path,
+        batch_size: int,
+        image_max_value: int,
+        image_min_value: int
+):
+    return load_fid_dataset(
+        image_dir=search_path,
+        batch_size=batch_size,
+        image_max_value=image_max_value,
+        image_min_value=image_min_value,
+        shuffle=False,
+        drop_last=False
+    )
 
 
 

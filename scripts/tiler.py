@@ -200,7 +200,7 @@ class Tiler:
                         mask_gdf = gpd.read_file(mask_file, mask=window_mask, engine="fiona")
                         mask_gdf = mask_gdf.to_crs(dataset.crs)
                         if mask_gdf.empty:
-                            print(f"Skipping tile.", end="\r")
+                            print(f"Skipping tile...", end="\r")
                             window_x_start += offset
                             window_x_end += offset
                             continue
@@ -237,13 +237,13 @@ class Tiler:
                                     masked = self.uint8_to_norm(masked).astype(np.uint16)  # np.uint16
 
                                 if masked.sum() / masked.size < self.tile_keep_ratio:
-                                    print(f"Dropping tile.", end="\r")
+                                    print(f"Dropping tile...", end="\r")
                                     window_x_start += offset
                                     window_x_end += offset
                                     continue
 
                                 tile_counter += 1
-                                print(f"Saving tile.", end="\r")
+                                print(f"Saving tile...", end="\r")
                                 self.save(
                                     image.astype(np.uint16),
                                     masked.astype(np.uint16),
