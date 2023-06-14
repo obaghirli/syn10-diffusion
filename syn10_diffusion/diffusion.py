@@ -234,6 +234,37 @@ class Diffusion:
                 x = p_mean + none_zero_mask * torch.exp(0.5 * p_log_variance) * torch.randn_like(x)
         return x
 
+    def p_sample_interpolate(self, model, shape, model_kwargs=None):
+        if model_kwargs is None:
+            model_kwargs = {}
+
+        assert isinstance(shape, (torch.Size, tuple, list))
+        assert model.training is False
+
+        device = next(model.parameters()).device
+        x = model_kwargs['x']  # on model device
+        y = model_kwargs['y']  # on model device
+        num_steps = model_kwargs['num_steps']
+        guidance = model_kwargs['guidance']
+        g_ch = model_kwargs['model_output_channels'] // 2
+        n = x.shape[0]
+
+        sequence = range(len(self.betas))
+        for timestep in reversed(list(sequence)):
+            if timestep > num_steps:
+                continue
+            with torch.no_grad():
+                t = torch.ones(n).to(device) * timestep
+                model_output = model(x, t.float(), y)
+                model_output_zero = model(x, t.float(), torch.zeros_like(y))
+                model_output[:, :g_ch] = \
+                    model_output_zero[:, :g_ch] + guidance * (model_output[:, :g_ch] - model_output_zero[:, :g_ch])
+                eps, var_signal = torch.chunk(model_output, 2, dim=1)
+                p_mean, _, p_log_variance = self.p_mean_variance(x, t.long(), eps, var_signal, clip_denoised=True)
+                none_zero_mask = (t != 0).float().view(-1, *([1] * (x.ndim - 1)))
+                x = p_mean + none_zero_mask * torch.exp(0.5 * p_log_variance) * torch.randn_like(x)
+        return x
+
 
 def _slice(arr: np.ndarray, timesteps: torch.Tensor, broadcast_shape: torch.Size) -> torch.Tensor:
     sliced_arr = torch.from_numpy(arr).to(device=timesteps.device)[timesteps].float()
