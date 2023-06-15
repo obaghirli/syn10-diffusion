@@ -83,7 +83,8 @@ def validate_args(args):
     if not Path(args.save_path).exists():
         raise RuntimeError(f"Save path {args.save_path} not found")
     assert args.num_steps > 0, "Number of steps must be greater than 0"
-    assert all([0 < lamda < 1 for lamda in args.lambda_interpolate]), "Interpolation factor must be between 0 and 1"
+    assert all([0 < lamda < 1 for lamda in args.lambda_interpolate]), \
+        "Interpolation factor must be between 0 and 1"
 
 
 def main():

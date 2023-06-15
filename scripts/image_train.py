@@ -27,10 +27,20 @@ def resolve_params(parser_args, config):
 
 
 def validate_args(parser_args):
+    if not Path(parser_args.config).exists():
+        raise RuntimeError(f"Config file {parser_args.config} not found")
+    if not Path(parser_args.data_dir).exists():
+        raise RuntimeError(f"Data directory {parser_args.data_dir} not found")
+    assert parser_args.num_checkpoints == -1 or parser_args.num_checkpoints > 0
     not_parser_run_id = parser_args.run_id is None
     not_parser_resume_step = parser_args.resume_step is None
     if not_parser_run_id ^ not_parser_resume_step:
         raise RuntimeError("Both run_id and resume_step must be specified to resume training")
+    if parser_args.resume_step is not None:
+        assert parser_args.resume_step > 0
+    if parser_args.run_id is not None:
+        run_dir = Path(parser_args.artifact_dir) / parser_args.run_id
+        assert run_dir.exists()
     if parser_args.test_model is not None:
         if parser_args.test_model not in models.get_models().keys():
             raise ValueError(f"Unknown test model {parser_args.test_model}. "
@@ -51,6 +61,7 @@ def main():
     parser.add_argument("--config", help="path to config file", type=str, required=True)
     parser.add_argument("--data_dir", help="path to data directory", type=str, required=True)
     parser.add_argument("--artifact_dir", help="path to output directory", type=str, required=True)
+    parser.add_argument("--num_checkpoints", help="keep last n checkpoints", type=int, required=True)
     parser.add_argument("--run_id", help="torch elastic run id (checkpoint id)", type=str)
     parser.add_argument("--resume_step", help="step to continue from", type=int)
     parser.add_argument("--test_model", help="test model to use, debug mode", type=str)

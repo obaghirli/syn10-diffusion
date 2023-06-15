@@ -29,6 +29,7 @@ class Trainer:
         self.grad_clip = params['grad_clip']
         self.p_uncond = params['p_uncond']
         self.checkpoint_freq = params['checkpoint_freq']
+        self.num_checkpoints = params['num_checkpoints']
         self.tensorboard_freq = params['tensorboard_freq']
         self.eval_freq = params['eval_freq']
         self.guidance = params['guidance']
@@ -108,11 +109,32 @@ class Trainer:
         ema_checkpoint = torch.load(ema_chckpoint_path, map_location=f"cuda:{self.local_rank}")
         self.ema.load_state_dict(ema_checkpoint['model_state_dict'])
 
+    @staticmethod
+    def keep_last_n_minus_one_checkpoints(checkpoint_dir: str, checkpoint_type: str, num_checkpoints: int):
+        files = os.listdir(checkpoint_dir)
+        checkpoint_files = [file for file in files if file.startswith(checkpoint_type)]
+        sorted_files = sorted(checkpoint_files, key=lambda x: int(x.split('_')[-1].split('.')[0]))
+        if num_checkpoints == -1:
+            delete_files = []
+        elif num_checkpoints == 1:
+            delete_files = sorted_files
+        else:
+            delete_files = sorted_files[:-num_checkpoints+1]
+        for file in delete_files:
+            file_path = Path(checkpoint_dir) / file
+            if file_path.exists():
+                file_path.unlink()
+
     def save_checkpoint(self, local_step, step, epoch):
         model_checkpoint_path = self.run_dir / f"model_checkpoint_{step}.pt.tar"
         optimizer_checkpoint_path = self.run_dir / f"optimizer_checkpoint_{step}.pt.tar"
         lr_scheduler_checkpoint_path = self.run_dir / f"lr_scheduler_checkpoint_{step}.pt.tar"
         ema_checkpoint_path = self.run_dir / f"ema_checkpoint_{step}.pt.tar"
+
+        self.keep_last_n_minus_one_checkpoints(str(self.run_dir), "model_checkpoint", self.num_checkpoints)
+        self.keep_last_n_minus_one_checkpoints(str(self.run_dir), "optimizer_checkpoint", self.num_checkpoints)
+        self.keep_last_n_minus_one_checkpoints(str(self.run_dir), "lr_scheduler_checkpoint", self.num_checkpoints)
+        self.keep_last_n_minus_one_checkpoints(str(self.run_dir), "ema_checkpoint", self.num_checkpoints)
 
         torch.save({
             'model_state_dict': self.ddp_model.module.state_dict(),

@@ -1,5 +1,6 @@
 import os
 import sys
+import uuid
 from pathlib import Path
 import argparse
 
@@ -28,8 +29,12 @@ def resolve_params(parser_args, config):
 
 
 def validate_args(parser_args):
+    if not Path(parser_args.config).exists():
+        raise RuntimeError(f"Config file {parser_args.config} not found")
     if not Path(parser_args.model_path).exists():
-        raise FileNotFoundError(f"Model file {parser_args.model_path} not found")
+        raise RuntimeError(f"Model file {parser_args.model_path} not found")
+    if not Path(parser_args.data_dir).exists():
+        raise RuntimeError(f"Data directory {parser_args.data_dir} not found")
     if parser_args.test_model is not None:
         if parser_args.test_model not in models.get_models().keys():
             raise ValueError(f"Unknown test model {parser_args.test_model}. "
@@ -145,8 +150,9 @@ def main():
         label_arr = np.concatenate(all_labels, axis=0).astype(np.uint16)
         for i in range(arr.shape[0]):
             print(f"Rank: {rank}, i_sample: {i + 1}/{len(arr)}", end='\r')
-            np.save(str(images_path / f"sample_{i}.npy"), arr[i])
-            np.save(str(annotations_path / f"label_{i}.npy"), label_arr[i])
+            filename = str(uuid.uuid4().hex)
+            np.save(str(images_path / f"{filename}.npy"), arr[i])
+            np.save(str(annotations_path / f"{filename}.npy"), label_arr[i])
         logger.log_info("Sampling finished")
         logger.log_info(f"Saved images to: {str(images_path.resolve())}")
         logger.log_info(f"Saved annotations to: {str(annotations_path.resolve())}")

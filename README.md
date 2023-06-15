@@ -79,7 +79,7 @@ python tiler.py \
 	--image_channels 3 \
 	--num_train_samples 1000 \
 	--num_val_samples 100 \
-	--save_dir /path/to/save/datset
+	--save_dir /path/to/save/dataset
 ```
 
 ## Training
@@ -88,7 +88,8 @@ python tiler.py \
 torchrun --standalone --nnodes=1 --nproc-per-node=1 image_train.py \
 	--config /path/to/syn10-diffusion/configs/sat25_test.yaml \
 	--data_dir /path/to/dataset \
-	--artifact_dir /path/to/save/outputs
+	--artifact_dir /path/to/save/outputs \
+	--num_checkpoints <keeps only last n checkpoints, [-1: disable, keep all]>
 ```
 > **Note:** Debugging model (which is a separate mini UnetModel) can be chosen via `--test_model UnetTest`, 
 however it is recommended to use the prod model (default model) for the training. If it does not fit into the memory, 
@@ -100,6 +101,7 @@ torchrun --standalone --nnodes=1 --nproc-per-node=1 image_train.py \
 	--config /path/to/syn10-diffusion/configs/sat25_test.yaml \
 	--data_dir /path/to/dataset \
 	--artifact_dir /path/to/saved/outputs \
+	--num_checkpoints 100 \
 	--run_id <id of the job run to continue from e.g.: cec0fba0-4ce5-4fa0-a2b5-f8a0cd36200f> \
 	--resume_step 100
 ```
@@ -151,6 +153,7 @@ torchrun --standalone --nnodes=1 --nproc-per-node=1 sam.py \
 	--image_min_value 0 \
 	--image_size 64 \
 	--batch_size 2 \
+	--num_batches <only do this many of batches to collect statistics> \
 	--num_classes 2 \
 	--image_dir /path/to/sampled/images \
 	--annotation_dir /path/to/real/annotations \
@@ -160,3 +163,29 @@ torchrun --standalone --nnodes=1 --nproc-per-node=1 sam.py \
 ```
 
 > **Note:** The above SAM script runs in cpu mode. To run in gpu mode, add `--gpu` argument.
+
+### Similarity search
+```commandline
+torchrun --standalone --nnodes=1 --nproc-per-node=1 similarity_search.py \
+	--search_path /path/to/real/training/images  \
+	--image_path /path/to/sampled/images/sample_0.npy /path/to/sampled/images/sample_1.npy \
+	--top_k 3 \
+	--batch_size 8 \
+	--image_size 64 \
+	--image_max_value 255 \
+	--image_min_value 0 \
+	--save_path /path/to/save/results
+```
+
+### Interpolation
+```commandline
+python interpolate.py \
+	--image_a_path /path/to/any/images/image_a.npy \
+	--image_b_path /path/to/any/images/image_b.npy \
+	--mask_path /path/to/any/annotations/mask.npy \
+	--model_path /path/to/model_checkpoint_<iteration number>.pt.tar \
+	--config /path/to/syn10-diffusion/configs/sat25_test.yaml \
+	--num_steps 500 \
+	--lambda_interpolate 0.2 0.8 \
+	--save_path /path/to/save/results
+```

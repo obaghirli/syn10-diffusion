@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import argparse
+from itertools import islice
 
 import numpy as np
 import cv2
@@ -75,6 +76,8 @@ def check_args(args):
     assert args.image_max_value > args.image_min_value >= 0
     assert args.image_size > 0
     assert args.batch_size > 0
+    if args.num_batches is not None:
+        assert args.num_batches > 0
     assert args.num_classes == 2, "Only binary segmentation is supported"
     assert Path(args.image_dir).exists()
     assert Path(args.annotation_dir).exists()
@@ -90,6 +93,7 @@ def main():
     parser.add_argument("--image_min_value", help="minimum allowed pixel value", type=int, required=True)
     parser.add_argument("--image_size", help="image size", type=int, required=True)
     parser.add_argument("--batch_size", help="batch size", type=int, required=True)
+    parser.add_argument("--num_batches", help="number of batches", type=int)
     parser.add_argument("--num_classes", help="number of classes", type=int, required=True)
     parser.add_argument("--image_dir", help="path to synthetic image dataset ", type=str, required=True)
     parser.add_argument("--annotation_dir", help="path to conditioning annotation dataset", type=str, required=True)
@@ -107,6 +111,7 @@ def main():
     local_rank = int(os.environ["LOCAL_RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
     run_id = os.environ['TORCHELASTIC_RUN_ID']
+    num_batches = args.num_batches
 
     device = torch.device(f"cuda:{local_rank}" if args.gpu else "cpu")
     sam = sam_model_registry[args.model_type](checkpoint=args.sam_checkpoint)
@@ -123,6 +128,9 @@ def main():
         shuffle=False,
         drop_last=False
     )
+
+    if num_batches is not None:
+        data_loader = islice(data_loader, num_batches)
 
     batch_iou_scores = []
     for batch_idx, (images, annotations) in enumerate(data_loader):
@@ -147,7 +155,7 @@ def main():
         print(
             f"Rank: {rank}, "
             f"batch size: {batched_pred_mask.shape[0]}, "
-            f"batch idx: {batch_idx + 1}/{len(data_loader)}, "
+            f"batch idx: {batch_idx + 1}/{len(data_loader) if num_batches is None else num_batches}, "
             f"IoU score: {batch_iou_score.item()}"
         )
 
