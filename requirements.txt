@@ -10,4 +10,5 @@ scipy==1.9.1
 Shapely==2.0.1
 torch==2.0.0
 torchvision==0.15.1
+tensorboard==2.12.2
 tqdm==4.65.0

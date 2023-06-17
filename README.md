@@ -50,7 +50,7 @@ Create a file named `syn10_diffusion.pth` in the `venv/lib/python3.8/site-packag
 
 ## Dataset creation
 
-### Fake dataset [debugging purposes only]
+### Dummy dataset [debugging purposes only]
 ```commandline
 python faker.py \
 	--image_size 64 \
@@ -122,7 +122,8 @@ torchrun --standalone --nnodes=1 --nproc-per-node=1 image_sample.py \
 	--config /path/to/syn10-diffusion/configs/sat25_test.yaml \
 	--model_path /path/to/model_checkpoint_<iteration number>.pt.tar \
 	--data_dir /path/to/dataset \
-	--artifact_dir /path/to/save/outputs
+	--artifact_dir /path/to/save/outputs \
+	--num_batches <sample only this many of batches, ignore for full execution>
 ```
 
 > **Note:**  Add `--test_model UnetTest` argument if the model you are sampling from is a debugging model.
@@ -153,7 +154,7 @@ torchrun --standalone --nnodes=1 --nproc-per-node=1 sam.py \
 	--image_min_value 0 \
 	--image_size 64 \
 	--batch_size 2 \
-	--num_batches <only do this many of batches to collect statistics> \
+	--num_batches <do only this many of batches to collect statistics, ignore for full execution> \
 	--num_classes 2 \
 	--image_dir /path/to/sampled/images \
 	--annotation_dir /path/to/real/annotations \
@@ -189,3 +190,36 @@ python interpolate.py \
 	--lambda_interpolate 0.2 0.8 \
 	--save_path /path/to/save/results
 ```
+
+
+### Experimentation
+Dataset complexity analysis
+Sampling speed
+
+Fixed parameters
+- num_diffusion_timesteps: 1000
+- ema_decay: 0.99
+- lambda_variational: 0.001
+- p_uncond: 0.2
+
+Control parameters
+- guidance: w/o, 1.5, 2.0
+- image_size: 64, 128
+
+Features
+- similarity search
+- interpolation
+- inpainting
+
+
+Experiment 1 (64x64)
+num_steps: 400k
+
+Experiment 2 (128x128)
+num_steps: 2.7m
+
+Human evaluation
+- Preference between synthetic vs real images
+
+Notes
+- NVIDIA Tesla V100

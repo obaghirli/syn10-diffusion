@@ -2,6 +2,7 @@ import os
 import sys
 import uuid
 from pathlib import Path
+from itertools import islice
 import argparse
 
 import torch
@@ -59,6 +60,7 @@ def main():
     parser.add_argument("--model_path", help="path to model file", type=str, required=True)
     parser.add_argument("--data_dir", help="path to data directory", type=str, required=True)
     parser.add_argument("--artifact_dir", help="path to output directory", type=str, required=True)
+    parser.add_argument("--num_batches", help="number of batches", type=int)
     parser.add_argument("--test_model", help="test model to use, debug mode", type=str)
 
     parser_args = parser.parse_args()
@@ -74,12 +76,13 @@ def main():
     rank = int(os.environ['RANK'])
     local_rank = int(os.environ['LOCAL_RANK'])
     world_size = int(os.environ['WORLD_SIZE'])
+    num_batches = params.get("num_batches", None)
 
     logger = DistributedLogger()
     logger.log_info(f"Starting job id: {params['run_id']}")
     logger.log_info(str(params))
     logger.log_info("Loading data")
-    data = load_sat25k(
+    data_loader = load_sat25k(
         data_dir=params['data_dir'],
         batch_size=params['sample_batch_size'],
         image_size=params['image_size'],
@@ -91,6 +94,9 @@ def main():
         shuffle=False,
         drop_last=False,
     )
+
+    if num_batches is not None:
+        data_loader = islice(data_loader, num_batches)
 
     logger.log_info("Creating sampler")
     diffusion = Diffusion(**params)
@@ -110,8 +116,12 @@ def main():
     all_samples = []
     all_labels = []
 
-    for i, (x, y) in enumerate(data):
-        print(f"Rank: {rank}, batch size: {x.shape[0]}, i_batch: {i + 1}/{len(data)}", end='\r')
+    for i, (x, y) in enumerate(data_loader):
+        print(
+            f"Rank: {rank}, "
+            f"batch size: {x.shape[0]}, "
+            f"i_batch: {i + 1}/{len(data_loader) if num_batches is None else num_batches}", end='\r'
+        )
         y = y.to(local_rank)
         sample = diffusion.p_sample(
             model,
@@ -130,7 +140,7 @@ def main():
         classes = torch.arange(params['num_classes'], device=local_rank)
         classes = classes.unsqueeze(0).unsqueeze(2).unsqueeze(3)
         classes = classes.expand(y.shape)
-        y = (classes * y).sum(dim=1, keepdim=True)
+        y = (classes * y).sum(dim=1, keepdim=False)
         y = y.contiguous()
 
         gathered_samples = [torch.zeros_like(sample) for _ in range(world_size)]
