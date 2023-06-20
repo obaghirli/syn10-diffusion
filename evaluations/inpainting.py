@@ -71,10 +71,8 @@ def load_mask(
 
 
 def validate_args(args):
-    if not Path(args.image_a_path).exists():
-        raise RuntimeError(f"Image file {args.image_a_path} not found")
-    if not Path(args.image_b_path).exists():
-        raise RuntimeError(f"Image file {args.image_b_path} not found")
+    if not Path(args.image_path).exists():
+        raise RuntimeError(f"Image file {args.image_path} not found")
     if not Path(args.mask_path).exists():
         raise RuntimeError(f"Mask file {args.mask_path} not found")
     if not Path(args.model_path).exists():
@@ -84,19 +82,15 @@ def validate_args(args):
     if not Path(args.save_path).exists():
         raise RuntimeError(f"Save path {args.save_path} not found")
     assert args.num_steps > 0, "Number of steps must be greater than 0"
-    assert all([0 < lamda < 1 for lamda in args.lambda_interpolate]), \
-        "Interpolation factor must be between 0 and 1"
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--image_a_path", help="path to the first", type=str, required=True)
-    parser.add_argument("--image_b_path", help="path to the second image", type=str, required=True)
+    parser.add_argument("--image_path", help="path to the modified (cut) image", type=str, required=True)
     parser.add_argument("--mask_path", help="path to mask file", type=str, required=True)
     parser.add_argument("--model_path", help="path to model file", type=str, required=True)
     parser.add_argument("--config", help="path to model config file", type=str, required=True)
     parser.add_argument("--num_steps", help="number of steps during interpolation", type=int, required=True)
-    parser.add_argument("--lambda_interpolate", help="interpolation factor (0.0, 1.0)", type=float, nargs="+", required=True)
     parser.add_argument("--save_path", help="path to save results", type=str, required=True)
 
     parser_args = parser.parse_args()
@@ -104,8 +98,7 @@ def main():
     config = utils.parse_config(parser_args.config)
     utils.validate_config(config)
 
-    image_a_path: Path = Path(parser_args.image_a_path)
-    image_b_path: Path = Path(parser_args.image_b_path)
+    image_path: Path = Path(parser_args.image_path)
     mask_path: Path = Path(parser_args.mask_path)
     model_path: Path = Path(parser_args.model_path)
     save_path: Path = Path(parser_args.save_path)
@@ -117,7 +110,7 @@ def main():
     num_classes = config['num_classes']
 
     run_id = str(uuid.uuid4())
-    save_path = save_path / "interpolation"
+    save_path = save_path / "inpainting"
     save_path.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -130,22 +123,14 @@ def main():
     model_checkpoint = torch.load(model_path, map_location=device)
     model.load_state_dict(model_checkpoint['model_state_dict'])
 
-    print("Loading images A and B...")
-    image_a: torch.Tensor = load_image(
-        image_a_path,
+    print("Loading image...")
+    image: torch.Tensor = load_image(
+        image_path,
         image_size,
         image_max_value,
         image_min_value
     )  # (1, C, H, W), [-1.0, 1.0], torch.float32
-    image_a = image_a.to(device)
-
-    image_b: torch.Tensor = load_image(
-        image_b_path,
-        image_size,
-        image_max_value,
-        image_min_value
-    )  # (1, C, H, W), [-1.0, 1.0], torch.float32
-    image_b = image_b.to(device)
+    image = image.to(device)
 
     print("Loading mask...")
     mask: torch.Tensor = load_mask(
@@ -155,35 +140,32 @@ def main():
     )  # (1, NC, H, W), [0.0, 1.0], torch.float32
     mask = mask.to(device)
 
+    print("Inpainting...")
     t = torch.tensor([num_steps]).long().to(device)
-    for lamda in parser_args.lambda_interpolate:
-        print(f"Interpolating with lambda={lamda}...")
-        with torch.no_grad():
-            noisy_image_a = diffusion.q_sample(image_a, t)
-            noisy_image_b = diffusion.q_sample(image_b, t)
-            noisy_image_interpolated = (1 - lamda) * noisy_image_a + lamda * noisy_image_b
-            sample = diffusion.p_sample_interpolate(
-                model,
-                noisy_image_a.shape,
-                model_kwargs={
-                    'x': noisy_image_interpolated,
-                    'y': mask,
-                    'num_steps': num_steps,
-                    'guidance': config['guidance'],
-                    'model_output_channels': config['model_output_channels']
-                }
-            )
-            sample = (sample + 1.0) / 2.0 * (config['image_max_value'] - config['image_min_value']) \
-                + config['image_min_value']
-            sample = sample.clamp(config['image_min_value'], config['image_max_value'])  # (1, C, H, W)
-            sample = sample.squeeze(0).cpu().numpy()
+    with torch.no_grad():
+        noisy_image = diffusion.q_sample(image, t)
+        sample = diffusion.p_sample_interpolate(
+            model,
+            noisy_image.shape,
+            model_kwargs={
+                'x': noisy_image,
+                'y': mask,
+                'num_steps': num_steps,
+                'guidance': config['guidance'],
+                'model_output_channels': config['model_output_channels']
+            }
+        )
+        sample = (sample + 1.0) / 2.0 * (config['image_max_value'] - config['image_min_value']) \
+            + config['image_min_value']
+        sample = sample.clamp(config['image_min_value'], config['image_max_value'])  # (1, C, H, W)
+        sample = sample.squeeze(0).cpu().numpy()
 
-            file_path = save_path / f"interpolate_{lamda}_{run_id}.npy"
-            np.save(str(file_path), sample)
-            print(f"Saved to {file_path}")
+        file_path = save_path / f"inpainting_{run_id}.npy"
+        np.save(str(file_path), sample)
+        print(f"Saved to {file_path}")
 
     payload = vars(parser_args)
-    file_path = save_path / f"interpolate_{run_id}.json"
+    file_path = save_path / f"inpainting_{run_id}.json"
     with open(file_path, "w") as f:
         json.dump(payload, f, indent=4)
 

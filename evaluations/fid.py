@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 import argparse
 import warnings
@@ -107,10 +108,14 @@ def calculate_fid(real_activations: np.ndarray, syn_activations: np.ndarray, eps
     return diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * tr_covmean
 
 
-def save(fid_score, save_path):
-    file = Path(save_path) / f"fid_score_{os.environ['TORCHELASTIC_RUN_ID']}.txt"
+def save(fid_score, parser_args):
+    save_path = Path(parser_args.save_path) / "fid"
+    save_path.mkdir(parents=True, exist_ok=True)
+    payload = {"fid_score": fid_score}
+    payload.update(vars(parser_args))
+    file = save_path / f"fid_score_{os.environ['TORCHELASTIC_RUN_ID']}.json"
     with open(file, "w") as f:
-        f.write(str(fid_score))
+        json.dump(payload, f, indent=4)
     print(f"Saved FID score to {file}")
 
 
@@ -184,7 +189,7 @@ def main():
         syn_activations = np.concatenate(syn_activations, axis=0).squeeze((2, 3))
         fid_score = calculate_fid(real_activations, syn_activations)
         print(f"FID score: {fid_score:.4f}")
-        save(fid_score, args.save_path)
+        save(fid_score, args)
 
     dist.barrier()
     dist.destroy_process_group()

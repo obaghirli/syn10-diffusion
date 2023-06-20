@@ -79,21 +79,21 @@ class Trainer:
             self.step += 1
 
     def load_model_checkpoint(self, resume_step):
-        model_checkpoint_path = self.run_dir / f"model_checkpoint_{resume_step}.pt.tar"
+        model_checkpoint_path = self.run_dir / "checkpoint" / f"model_checkpoint_{resume_step}.pt.tar"
         if not model_checkpoint_path.exists():
             raise FileNotFoundError(f"Model checkpoint {model_checkpoint_path} does not exist")
         model_checkpoint = torch.load(model_checkpoint_path, map_location=f"cuda:{self.local_rank}")
         self.ddp_model.module.load_state_dict(model_checkpoint['model_state_dict'])
 
     def load_optimizer_checkpoint(self, resume_step):
-        optimizer_checkpoint_path = self.run_dir / f"optimizer_checkpoint_{resume_step}.pt.tar"
+        optimizer_checkpoint_path = self.run_dir / "checkpoint" / f"optimizer_checkpoint_{resume_step}.pt.tar"
         if not optimizer_checkpoint_path.exists():
             raise FileNotFoundError(f"Optimizer checkpoint {optimizer_checkpoint_path} does not exist")
         optimizer_checkpoint = torch.load(optimizer_checkpoint_path, map_location=f"cuda:{self.local_rank}")
         self.optimizer.load_state_dict(optimizer_checkpoint['optimizer_state_dict'])
 
     def load_lr_scheduler_checkpoint(self, resume_step):
-        lr_scheduler_checkpoint_path = self.run_dir / f"lr_scheduler_checkpoint_{resume_step}.pt.tar"
+        lr_scheduler_checkpoint_path = self.run_dir / "checkpoint" / f"lr_scheduler_checkpoint_{resume_step}.pt.tar"
         if not lr_scheduler_checkpoint_path.exists():
             raise FileNotFoundError(f"LR scheduler checkpoint {lr_scheduler_checkpoint_path} does not exist")
         lr_scheduler_checkpoint = torch.load(lr_scheduler_checkpoint_path, map_location=f"cuda:{self.local_rank}")
@@ -103,7 +103,7 @@ class Trainer:
         self.start_epoch = lr_scheduler_checkpoint['epoch']
 
     def load_ema_checkpoint(self, resume_step):
-        ema_chckpoint_path = self.run_dir / f"ema_checkpoint_{resume_step}.pt.tar"
+        ema_chckpoint_path = self.run_dir / "checkpoint" / f"ema_checkpoint_{resume_step}.pt.tar"
         if not ema_chckpoint_path.exists():
             raise FileNotFoundError(f"EMA checkpoint {ema_chckpoint_path} does not exist")
         ema_checkpoint = torch.load(ema_chckpoint_path, map_location=f"cuda:{self.local_rank}")
@@ -126,15 +126,17 @@ class Trainer:
                 file_path.unlink()
 
     def save_checkpoint(self, local_step, step, epoch):
-        model_checkpoint_path = self.run_dir / f"model_checkpoint_{step}.pt.tar"
-        optimizer_checkpoint_path = self.run_dir / f"optimizer_checkpoint_{step}.pt.tar"
-        lr_scheduler_checkpoint_path = self.run_dir / f"lr_scheduler_checkpoint_{step}.pt.tar"
-        ema_checkpoint_path = self.run_dir / f"ema_checkpoint_{step}.pt.tar"
+        checkpoint_path = self.run_dir / "checkpoint"
+        checkpoint_path.mkdir(parents=True, exist_ok=True)
+        model_checkpoint_path = checkpoint_path / f"model_checkpoint_{step}.pt.tar"
+        optimizer_checkpoint_path = checkpoint_path / f"optimizer_checkpoint_{step}.pt.tar"
+        lr_scheduler_checkpoint_path = checkpoint_path / f"lr_scheduler_checkpoint_{step}.pt.tar"
+        ema_checkpoint_path = checkpoint_path / f"ema_checkpoint_{step}.pt.tar"
 
-        self.keep_last_n_minus_one_checkpoints(str(self.run_dir), "model_checkpoint", self.num_checkpoints)
-        self.keep_last_n_minus_one_checkpoints(str(self.run_dir), "optimizer_checkpoint", self.num_checkpoints)
-        self.keep_last_n_minus_one_checkpoints(str(self.run_dir), "lr_scheduler_checkpoint", self.num_checkpoints)
-        self.keep_last_n_minus_one_checkpoints(str(self.run_dir), "ema_checkpoint", self.num_checkpoints)
+        self.keep_last_n_minus_one_checkpoints(str(checkpoint_path), "model_checkpoint", self.num_checkpoints)
+        self.keep_last_n_minus_one_checkpoints(str(checkpoint_path), "optimizer_checkpoint", self.num_checkpoints)
+        self.keep_last_n_minus_one_checkpoints(str(checkpoint_path), "lr_scheduler_checkpoint", self.num_checkpoints)
+        self.keep_last_n_minus_one_checkpoints(str(checkpoint_path), "ema_checkpoint", self.num_checkpoints)
 
         torch.save({
             'model_state_dict': self.ddp_model.module.state_dict(),
@@ -277,7 +279,7 @@ class Trainer:
 
                     param_norm, grad_norm = self.compute_norms()
 
-                    with SummaryWriter(log_dir=self.run_dir) as tb_writer:
+                    with SummaryWriter(log_dir=self.run_dir / "tensorboard") as tb_writer:
                         tb_writer.add_scalar("avg_loss", avg_loss.item(), self.step)
                         tb_writer.add_scalar("avg_mse_loss", avg_mse_loss.item(), self.step)
                         tb_writer.add_scalar("avg_vlb_loss", avg_vlb_loss.item(), self.step)
@@ -308,7 +310,7 @@ class Trainer:
                         sample = torch.narrow(sample, 1, 0, 3)
                     else:
                         sample = torch.narrow(sample, 1, 0, 1)
-                    with SummaryWriter(log_dir=self.run_dir) as tb_writer:
+                    with SummaryWriter(log_dir=self.run_dir / "tensorboard") as tb_writer:
                         tb_writer.add_images("sample", sample, self.step)
 
                 dist.barrier()

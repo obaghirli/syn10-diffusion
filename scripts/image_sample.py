@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import uuid
 from pathlib import Path
 from itertools import islice
@@ -111,11 +112,11 @@ def main():
     model_checkpoint = torch.load(Path(params['model_path']), map_location=f"cuda:{local_rank}")
     model.load_state_dict(model_checkpoint['model_state_dict'])
     logger.log_info(f"Loaded model from: {Path(params['model_path']).resolve()}")
-
     logger.log_info("Starting sampling")
+    start_time = time.time()
+
     all_samples = []
     all_labels = []
-
     for i, (x, y) in enumerate(data_loader):
         print(
             f"Rank: {rank}, "
@@ -151,10 +152,14 @@ def main():
         dist.all_gather(gathered_labels, y)
         all_labels.extend([labels.cpu().numpy() for labels in gathered_labels])
 
+    end_time = time.time()
     if rank == 0:
-        save_path = Path(params['artifact_dir']) / params['run_id']
+        model_name = Path(params['model_path']).stem.split('.')[0]
+        save_path = Path(params['artifact_dir']) / f"sampler_{model_name}_{params['run_id']}"
         images_path = save_path / "images"
         annotations_path = save_path / "annotations"
+        images_path.mkdir(parents=True, exist_ok=True)
+        annotations_path.mkdir(parents=True, exist_ok=True)
         logger.log_info(f"Saving samples")
         arr = np.concatenate(all_samples, axis=0).astype(np.uint16)
         label_arr = np.concatenate(all_labels, axis=0).astype(np.uint16)
@@ -164,6 +169,7 @@ def main():
             np.save(str(images_path / f"{filename}.npy"), arr[i])
             np.save(str(annotations_path / f"{filename}.npy"), label_arr[i])
         logger.log_info("Sampling finished")
+        logger.log_info(f"Elapsed time: {end_time - start_time:.2f} seconds")
         logger.log_info(f"Saved images to: {str(images_path.resolve())}")
         logger.log_info(f"Saved annotations to: {str(annotations_path.resolve())}")
 

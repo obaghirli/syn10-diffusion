@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from pathlib import Path
 import argparse
 
@@ -109,13 +110,16 @@ def main():
     model = model_class(**params).to(local_rank)
     model.train()
 
+    logger.log_info(f"Model size (total, trainable): {utils.get_model_size(model)}")
     logger.log_info("Creating trainer")
     trainer = Trainer(model=model, diffusion=diffusion, data=data, **params)
 
     logger.log_info("Starting training")
+    start_time = time.time()
     trainer.run()
-
+    end_time = time.time()
     logger.log_info("Training finished")
+    logger.log_info(f"Elapsed time: {end_time - start_time:.2f} seconds")
     dist.destroy_process_group()
 
 

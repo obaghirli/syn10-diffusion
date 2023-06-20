@@ -107,5 +107,9 @@ def validate_config(config: dict):
     check_attn_resolutions(config["image_size"], config["channel_mult"], config["attn_resolutions"])
 
 
+def get_model_size(model):
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return total_params, trainable_params
 
 

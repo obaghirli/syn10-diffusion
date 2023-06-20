@@ -23,7 +23,8 @@ class DistributedLogger:
             self.params = Globals().params
             self.is_train = self.params['is_train']
             self.run_dir = Path(self.params['artifact_dir']) / self.params['run_id']
-            self.log_file = self.run_dir / 'log_train.txt' if self.is_train else self.run_dir / 'log_sample.txt'
+            self.log_file = self.run_dir / "userlog" / 'log_train.txt' if self.is_train \
+                else self.run_dir / "userlog" / 'log_sample.txt'
             self.log_file.parent.mkdir(parents=True, exist_ok=True)
             self.logger = logging.getLogger(__name__)
             self.logger.setLevel(logging.DEBUG)

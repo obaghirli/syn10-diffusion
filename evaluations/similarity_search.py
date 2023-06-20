@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import argparse
 from typing import List
 from pathlib import Path
@@ -222,10 +223,14 @@ def main():
         )  # (k, n, 3, args.image_size, args.image_size)
         top_k_images = top_k_images.cpu().numpy()
         top_k_similarities = top_k_similarities.cpu().numpy()
+        save_path = save_path / "similarity"
+        save_path.mkdir(parents=True, exist_ok=True)
         top_k_images_path = str(save_path / f"top_k_images_{run_id}.npy")
         top_k_similarities_path = str(save_path / f"top_k_similarities_{run_id}.npy")
         np.save(top_k_images_path, top_k_images.astype(np.uint16))
         np.save(top_k_similarities_path, top_k_similarities.astype(np.float32))
+        with open(save_path / f"top_k_{run_id}.json", "w") as f:
+            json.dump(vars(args), f, indent=4)
         print(f"Saved top k images to {top_k_images_path}")
         print(f"Saved top k similarities to {top_k_similarities_path}")
         print("Done!")

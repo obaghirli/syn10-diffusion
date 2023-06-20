@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 import argparse
 from itertools import islice
@@ -166,9 +167,13 @@ def main():
 
     if rank == 0:
         print(f"Average IoU score: {avg_iou_score.item()}")
-        file_path = Path(args.save_dir) / f"iou_score_{run_id}.txt"
+        save_dir = Path(args.save_dir) / "sam"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        payload = {"iou_score": avg_iou_score.item()}
+        payload.update(vars(args))
+        file_path = save_dir / f"iou_score_{run_id}.json"
         with open(file_path, "w") as f:
-            f.write(f"{avg_iou_score.item()}")
+            json.dump(payload, f, indent=4)
         print(f"Saved IoU score to {file_path}")
 
     dist.barrier()
