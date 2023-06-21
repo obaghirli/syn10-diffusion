@@ -245,34 +245,35 @@ Model
 - t_embed_mult: 4.0
 - y_embed_mult: 1.0
 - lr_scheduler_t_mult: 1
-- train_batch_size: 8
-- sample_batch_size: 8
+
 
 Checkpoint
 - ema_delay: 10000
 
-Experiment 1 (64x64)
+Experiment 1 (64x64, 16gb 1080Ti)
 - image_size: 64
 - dropout: 0.1
-- num_epochs: 65 (num_steps: 400k)
+- num_epochs: 257 (num_steps: 400k)
 - channel_mult: [1, 2, 3, 4]
 - model_channels: 64
 - head_channels: 32
-- lr_scheduler_t_0: 65
-
+- lr_scheduler_t_0: 257
+- train_batch_size: 32
+- sample_batch_size: 32
 - checkpoint_freq: 20000
 - tensorboard_freq: 400
 - eval_freq: 20000
 
-Experiment 2 (128x128)
+Experiment 2 (128x128, 32gb Tesla v100)
 - image_size: 128
 - dropout: 0.0
-- num_epochs: 401 (num_steps: 2.5m)
+- num_epochs: 801 (num_steps: 2.5m)
 - channel_mult: [1, 1, 2, 3, 4]
 - model_channels: 128
 - head_channels: 64
-- lr_scheduler_t_0: 401
-
+- lr_scheduler_t_0: 801
+- train_batch_size: 16
+- sample_batch_size: 16
 - checkpoint_freq: 50000
 - tensorboard_freq: 2500
 - eval_freq: 50000

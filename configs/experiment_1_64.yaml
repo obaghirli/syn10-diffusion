@@ -20,16 +20,16 @@ num_resnet_blocks: 2
 t_embed_mult: 4.0
 y_embed_mult: 1.0
 lr_scheduler_t_mult: 1
-train_batch_size: 8
-sample_batch_size: 8
+train_batch_size: 32
+sample_batch_size: 32
 ema_delay: 10000
 image_size: 64
 dropout: 0.1
-num_epochs: 65
+num_epochs: 257
 channel_mult: [1, 2, 3, 4]
 model_channels: 64
 head_channels: 32
-lr_scheduler_t_0: 65
+lr_scheduler_t_0: 257
 checkpoint_freq: 20000
 tensorboard_freq: 400
 eval_freq: 20000
