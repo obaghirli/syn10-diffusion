@@ -234,6 +234,49 @@ class Diffusion:
                 x = p_mean + none_zero_mask * torch.exp(0.5 * p_log_variance) * torch.randn_like(x)
         return x
 
+    def p_sample_trajectory(self, model, shape, model_kwargs=None):
+        if model_kwargs is None:
+            model_kwargs = {}
+        assert isinstance(shape, (torch.Size, tuple, list))
+        assert model.training is False
+
+        device = next(model.parameters()).device
+        y = model_kwargs['y']
+        guidance = model_kwargs['guidance']
+        g_ch = model_kwargs['model_output_channels'] // 2
+
+        x = torch.randn(*shape).to(device)
+        n = x.shape[0]
+
+        save_trajectory = model_kwargs['save_trajectory']
+        num_trajectory = len(save_trajectory)
+        trajectory = torch.empty(
+            (shape[0], shape[1]*num_trajectory, shape[2], shape[3]),
+            dtype=torch.float32
+        ).to(device)
+        channel_offset = 0
+        if 1000 in save_trajectory:
+            trajectory[:, channel_offset:shape[1], :, :] = x
+            channel_offset += shape[1]
+        sequence = range(len(self.betas))
+        for timestep in reversed(list(sequence)):
+            print(f"time step: {timestep}")
+            with torch.no_grad():
+                t = torch.ones(n).to(device) * timestep
+                model_output = model(x, t.float(), y)
+                model_output_zero = model(x, t.float(), torch.zeros_like(y))
+                model_output[:, :g_ch] = \
+                    model_output_zero[:, :g_ch] + guidance * (model_output[:, :g_ch] - model_output_zero[:, :g_ch])
+                eps, var_signal = torch.chunk(model_output, 2, dim=1)
+                p_mean, _, p_log_variance = self.p_mean_variance(x, t.long(), eps, var_signal, clip_denoised=True)
+                none_zero_mask = (t != 0).float().view(-1, *([1] * (x.ndim - 1)))
+                x = p_mean + none_zero_mask * torch.exp(0.5 * p_log_variance) * torch.randn_like(x)
+                if timestep in save_trajectory:
+                    print(f"register time step: {timestep}")
+                    trajectory[:, channel_offset:channel_offset+shape[1], :, :] = x
+                    channel_offset += shape[1]
+        return trajectory
+
     def p_sample_interpolate(self, model, shape, model_kwargs=None):
         if model_kwargs is None:
             model_kwargs = {}
