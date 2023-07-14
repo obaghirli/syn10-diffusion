@@ -457,6 +457,16 @@ torchrun --standalone --nnodes=1 --nproc-per-node=1 sam.py \
 	--save_dir /datadrive/results \
 	--gpu
 
+torchrun --standalone --nnodes=1 --nproc-per-node=1 similarity_search.py \
+	--search_path /datadrive/data/training/images  \
+	--image_path /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images/01205b8d60cc4053aefa45c3744e5e83.npy /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images/01482c9ba199457b9ff4528bfdcf13ba.npy /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images/019760c855e04c309a6a568aad478512.npy /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images/01c25d4f5363471290ed1f7019eee844.npy /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images/021f666a5967471981e2d1787dbaa339.npy /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images/0275085c0e9a4f0597e66603f5bf811c.npy \
+	--top_k 3 \
+	--batch_size 32 \
+	--image_size 128 \
+	--image_max_value 255 \
+	--image_min_value 0 \
+	--save_path /datadrive/results
+
 python interpolate.py \
 	--image_a_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/interpolate_image_a.npy \
 	--image_b_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/interpolate_image_b.npy \
@@ -472,7 +482,7 @@ python inpainting.py \
 	--mask_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/inpaint_mask.npy \
 	--model_path /datadrive/results/c34830b4-1331-4794-af7f-f726620e9e95/checkpoint/ema_checkpoint_1250000.pt.tar \
 	--config /home/azureuser/syn10-diffusion/configs/experiment_2_128.yaml \
-	--num_steps 600 \
+	--num_steps 600 \ <also 650, 700, 750, 800, 850, 900, 950>
 	--save_path /datadrive/results
 
 torchrun --standalone --nnodes=1 --nproc-per-node=1 trajectory.py \
