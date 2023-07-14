@@ -457,6 +457,24 @@ torchrun --standalone --nnodes=1 --nproc-per-node=1 sam.py \
 	--save_dir /datadrive/results \
 	--gpu
 
+python interpolate.py \
+	--image_a_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/interpolate_image_a.npy \
+	--image_b_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/interpolate_image_b.npy \
+	--mask_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/interpolate_mask.npy \
+	--model_path /datadrive/results/c34830b4-1331-4794-af7f-f726620e9e95/checkpoint/ema_checkpoint_1250000.pt.tar \
+	--config /home/azureuser/syn10-diffusion/configs/experiment_2_128.yaml \
+	--num_steps 600 \
+	--lambda_interpolate 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 \
+	--save_path /datadrive/results
+
+python inpainting.py \
+	--image_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/inpaint_image.npy \
+	--mask_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/inpaint_mask.npy \
+	--model_path /datadrive/results/c34830b4-1331-4794-af7f-f726620e9e95/checkpoint/ema_checkpoint_1250000.pt.tar \
+	--config /home/azureuser/syn10-diffusion/configs/experiment_2_128.yaml \
+	--num_steps 600 \
+	--save_path /datadrive/results
+
 torchrun --standalone --nnodes=1 --nproc-per-node=1 trajectory.py \
 	--config /home/azureuser/syn10-diffusion/configs/experiment_2_128.yaml \
 	--model_path /datadrive/results/c34830b4-1331-4794-af7f-f726620e9e95/checkpoint/ema_checkpoint_1250000.pt.tar \

@@ -161,7 +161,7 @@ def main():
         sample = sample.squeeze(0).cpu().numpy()
 
         file_path = save_path / f"inpainting_{run_id}.npy"
-        np.save(str(file_path), sample)
+        np.save(str(file_path), sample.astype(np.uint16))
         print(f"Saved to {file_path}")
 
     payload = vars(parser_args)
