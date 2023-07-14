@@ -203,6 +203,16 @@ python inpainting.py \
 	--save_path /path/to/save/results
 ```
 
+### Trajectory
+```commandline
+torchrun --standalone --nnodes=1 --nproc-per-node=1 trajectory.py \
+	--config /path/to/configs/config.yaml \
+	--model_path /path/to/model_checkpoint_<iteration number>.pt.tar \
+	--data_dir /path/to/dataset \
+	--artifact_dir /path/to/save/results \
+	--save_trajectory 1000 900 800 700 600 500 400 300 200 100 0 
+```
+
 ### Experimentation
 
 Directory structure
@@ -372,14 +382,21 @@ python inpainting.py \
 	--config /home/orkhan/syn10-diffusion/configs/experiment_1_64.yaml \
 	--num_steps 500 \
 	--save_path /home/orkhan/results
+	
+torchrun --standalone --nnodes=1 --nproc-per-node=1 trajectory.py \
+	--config /home/orkhan/syn10-diffusion/configs/experiment_1_64.yaml \
+	--model_path /home/orkhan/results/438143b4-d47b-4d20-891a-3c37ef753848/checkpoint/ema_checkpoint_40000.pt.tar \
+	--data_dir /home/orkhan/data \
+	--artifact_dir /home/orkhan/results \
+	--save_trajectory 1000 900 800 700 600 500 400 300 200 100 0 
 ```
 
 Experiment 2 scripts
 ```commandline
 python tiler.py \
-	--image_root_dir /home/orkhan/iac \
+	--image_root_dir /home/azureuser/iac \
 	--image_extensions tif \
-	--mask_root_dir /home/orkhan/iac \
+	--mask_root_dir /home/azureuser/iac \
 	--mask_extensions shp \
 	--tile_size 128 \
 	--tile_overlap 0.5 \
@@ -390,5 +407,60 @@ python tiler.py \
 	--image_channels 3 \
 	--num_train_samples 50000 \
 	--num_val_samples 5000 \
-	--save_dir /home/orkhan/data
+	--save_dir /datadrive/data
+
+torchrun --standalone --nnodes=1 --nproc-per-node=1 image_train.py \
+	--config /home/azureuser/syn10-diffusion/configs/experiment_2_128.yaml \
+	--data_dir /datadrive/data \
+	--artifact_dir /datadrive/results \
+	--num_checkpoints -1
+
+torchrun --standalone --nnodes=1 --nproc-per-node=1 image_sample.py \
+	--config /home/azureuser/syn10-diffusion/configs/experiment_2_128.yaml \
+	--model_path /datadrive/results/c34830b4-1331-4794-af7f-f726620e9e95/checkpoint/ema_checkpoint_1250000.pt.tar \
+	--data_dir /datadrive/data \
+	--artifact_dir /datadrive/results
+
+torchrun --standalone --nnodes=1 --nproc-per-node=1 fid.py \
+	--real_path /datadrive/data/validation/images  \
+	--syn_path /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images \
+	--batch_size 64 \
+	--image_max_value 255 \
+	--image_min_value 0 \
+	--save_path /datadrive/results
+
+torchrun --standalone --nnodes=1 --nproc-per-node=1 sam.py \
+	--num_points 5 \
+	--image_max_value 255 \
+	--image_min_value 0 \
+	--image_size 128 \
+	--batch_size 2 \
+	--num_classes 2 \
+	--image_dir /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images \
+	--annotation_dir /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/annotations \
+	--sam_checkpoint /home/azureuser/sam_vit_h_4b8939.pth \
+	--model_type vit_h \
+	--save_dir /datadrive/results \
+	--gpu
+
+torchrun --standalone --nnodes=1 --nproc-per-node=1 sam.py \
+	--num_points 5 \
+	--image_max_value 255 \
+	--image_min_value 0 \
+	--image_size 128 \
+	--batch_size 2 \
+	--num_classes 2 \
+	--image_dir /datadrive/data/validation/images \
+	--annotation_dir /datadrive/data/validation/annotations \
+	--sam_checkpoint /home/azureuser/sam_vit_h_4b8939.pth \
+	--model_type vit_h \
+	--save_dir /datadrive/results \
+	--gpu
+
+torchrun --standalone --nnodes=1 --nproc-per-node=1 trajectory.py \
+	--config /home/azureuser/syn10-diffusion/configs/experiment_2_128.yaml \
+	--model_path /datadrive/results/c34830b4-1331-4794-af7f-f726620e9e95/checkpoint/ema_checkpoint_1250000.pt.tar \
+	--data_dir /datadrive/data \
+	--artifact_dir /datadrive/results \
+	--save_trajectory 1000 900 800 700 600 500 400 300 200 100 0 
 ```

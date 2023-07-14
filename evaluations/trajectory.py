@@ -41,8 +41,8 @@ def validate_args(parser_args):
             raise ValueError(f"Unknown test model {parser_args.test_model}. "
                              f"Available test models: {list(set(models.get_models().keys()) - set('prod'))}")
     for timestep in parser_args.save_trajectory:
-        if timestep < 0 or timestep > 999:
-            raise ValueError(f"Invalid timestep {timestep}. Must be in range [0, 999]")
+        if timestep < 0 or timestep > 1000:
+            raise ValueError(f"Invalid timestep {timestep}. Must be in range [0, 1000]")
     if parser_args.save_trajectory != sorted(parser_args.save_trajectory, reverse=True):
         raise ValueError("save_trajectory must be sorted in reverse order")
 

@@ -256,6 +256,8 @@ class Diffusion:
         ).to(device)
         channel_offset = 0
         if 1000 in save_trajectory:
+            print(f"time step: {1000}")
+            print(f"register time step: {1000}")
             trajectory[:, channel_offset:shape[1], :, :] = x
             channel_offset += shape[1]
         sequence = range(len(self.betas))
