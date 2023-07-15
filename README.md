@@ -485,6 +485,14 @@ python inpainting.py \
 	--num_steps 600 \ <also 650, 700, 750, 800, 850, 900, 950>
 	--save_path /datadrive/results
 
+python inpainting.py \
+	--image_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/inpaint_image_v2.npy \
+	--mask_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/inpaint_mask_v2.npy \
+	--model_path /datadrive/results/c34830b4-1331-4794-af7f-f726620e9e95/checkpoint/ema_checkpoint_1250000.pt.tar \
+	--config /home/azureuser/syn10-diffusion/configs/experiment_2_128.yaml \
+	--num_steps 800 \
+	--save_path /datadrive/results
+
 torchrun --standalone --nnodes=1 --nproc-per-node=1 trajectory.py \
 	--config /home/azureuser/syn10-diffusion/configs/experiment_2_128.yaml \
 	--model_path /datadrive/results/c34830b4-1331-4794-af7f-f726620e9e95/checkpoint/ema_checkpoint_1250000.pt.tar \
