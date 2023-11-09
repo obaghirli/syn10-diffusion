@@ -2,7 +2,7 @@
 ![Python 3.8](https://img.shields.io/badge/python-3.8-green.svg)
 
 # SatDM
-This repository contains the code and resources for the paper titled  [ Synthesizing Realistic Satellite Image with Semantic Layout Conditioning using Diffusion Models.]()
+This repository contains the code and resources for the paper titled  [ Synthesizing Realistic Satellite Image with Semantic Layout Conditioning using Diffusion Models.](https://arxiv.org/pdf/2309.16812.pdf)
 
 <p align="center">
 <img src=assets/samples_128.svg />
