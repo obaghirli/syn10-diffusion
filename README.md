@@ -1,44 +1,33 @@
 [![License CC BY-NC-SA 4.0](https://img.shields.io/badge/license-CC4.0-blue.svg)](https://raw.githubusercontent.com/obaghirli/syn10-diffusion/main/LICENSE.md)
 ![Python 3.8](https://img.shields.io/badge/python-3.8-green.svg)
 
-# Synthesizing Photorealistic Satellite Imagery with Semantic Layout Conditioning using Denoising Diffusion Probabilistic Models
+# SatDM
+This repository contains the code and resources for the paper titled  [ Synthesizing Realistic Satellite Image with Semantic Layout Conditioning using Diffusion Models.]()
 
-
-
-
-## Development Environment
-
-|       | Version           |
-|-------|------------------:|
-| OS    | Ubuntu 22.04.2 LTS|
-| Python|           3.8.16 |
-| PyTorch|           2.0.0 |
-| CUDA  |           11.7   |
-| cuDNN |           8.5.0  |
-| GPU   | GeForce RTX 2060 Mobile |
-| Driver|     515.65.01    |
-
+<p align="center">
+<img src=assets/samples_128.svg />
+</p>
 
 ## Installation
-1. Clone the syn10-diffusion repository:
+1. Clone this repository:
 ```bash
 git clone https://github.com/obaghirli/syn10-diffusion.git
+cd syn10-diffusion
 ```
 2. Create virtual environment and install the requirements:
 ```bash
 python3.8 -m venv venv
 (venv) python -m pip install -r requirements.txt
 ```
-3. Clone the segment-anything repository:
+3. Clone the segment-anything repository (to calculate segment-anything score):
 ```bash
 git clone https://github.com/facebookresearch/segment-anything.git
 ```
-4. Download the pretrained model:
+4. Download the pretrained segment-anything model:
 ```bash
 wget -O sam_vit_h_4b8939.pth https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth
-
 ```
-5. Set system paths:  
+5. Set system paths:
 Create a file named `syn10_diffusion.pth` in the `venv/lib/python3.8/site-packages` directory and add the following lines:
 ```
 /path/to/syn10-diffusion
@@ -48,47 +37,59 @@ Create a file named `syn10_diffusion.pth` in the `venv/lib/python3.8/site-packag
 /path/to/segment-anything/segment_anything
 ```
 
-## Dataset creation
+## Data
 
-### Dummy dataset [debugging purposes only]
-```commandline
-python faker.py \
-	--image_size 64 \
-	--image_channels 3 \
-	--image_max_value 255 \
-	--image_min_value 0 \
-	--num_train_samples 1000 \
-	--num_val_samples 100 \
-	--save_dir /path/to/save/dataset
-```
+We trained the model using 0.5-meter resolution data of Baku, which was acquired through the Google Earth platform and manually labeled the acquired data using QGIS software and conducted cross-checks to correct any labeling errors. Dataset description is given below:
 
-### Real dataset
-Link to dataset: https://drive.google.com/file/d/1jF3LLk9sBrYXgC5iow-5PxE9g6xA2Igm/view?usp=sharing
-```commandline
+<p align="center">
+<img src=assets/dataset.png />
+</p>
+
+
+Data can be downloaded from [here](https://drive.google.com/file/d/1jF3LLk9sBrYXgC5iow-5PxE9g6xA2Igm/view?usp=sharing).
+
+You can tile the downloaded data using the following command: 
+
+```bash
 python tiler.py \
-	--image_root_dir /path/to/images/root/directory \
+	--image_root_dir <path_to_images_root_directory> \
 	--image_extensions tif \
-	--mask_root_dir /path/to/masks/root/directory \
+	--mask_root_dir <path_to_masks_root_directory> \
 	--mask_extensions shp \
-	--tile_size 128 \
-	--tile_overlap 0.0 \
-	--tile_keep_ratio 0.1 \
-	--downsample_factor 2 \
-	--image_max_value 255 \
-	--image_min_value 0 \
-	--image_channels 3 \
-	--num_train_samples 1000 \
-	--num_val_samples 100 \
-	--save_dir /path/to/save/data
+	--tile_size <tile_size> \
+	--tile_overlap <tile_overlap> \
+	--tile_keep_ratio <tile_keep_ratio> \
+	--downsample_factor <downsample_factor> \
+	--image_max_value <maximum_value_of_pixel_of_image> \
+	--image_min_value <minimum_value_of_pixel_of_image> \
+	--image_channels <number_of_image_channels> \
+	--num_train_samples <number_of_train_samples> \
+	--num_val_samples <number_of_validation_samples> \
+	--save_dir <path_to_save_data>
 ```
 
+The output directory structure will be as follows:
+
+```
+data_dir
+├── training
+│   ├── images
+│   └── annotations
+└── validation
+    ├── images
+    └── annotations
+```
 ## Training
+
 ### Training a model from scratch
-```commandline
+
+To train your model, you should first decide on some hyperparameters. The list of hyperparameters and the values we have chosen for experiments can be found in the `configs` folder. After you have created a config file, you can train your model using the following command:
+
+```bash
 torchrun --standalone --nnodes=1 --nproc-per-node=1 image_train.py \
-	--config /path/to/configs/config.yaml \
-	--data_dir /path/to/dataset \
-	--artifact_dir /path/to/save/outputs \
+	--config <path_to_configs_config.yaml> \
+	--data_dir <path_to_dataset> \
+	--artifact_dir <path_to_save_outputs> \
 	--num_checkpoints <keeps only last n checkpoints, [-1: disable, keep all]>
 ```
 > **Note:** Debugging model (which is a separate mini UnetModel) can be chosen via `--test_model UnetTest`, 
@@ -96,58 +97,68 @@ however it is recommended to use the prod model (default model) for the training
 then you can reduce batch size, or depth of the model etc. 
 
 ### Resuming training from a checkpoint
-```commandline
+
+You can also resume training from a checkpoint using the following command:
+
+```bash
 torchrun --standalone --nnodes=1 --nproc-per-node=1 image_train.py \
-	--config /path/to/configs/config.yaml \
-	--data_dir /path/to/dataset \
-	--artifact_dir /path/to/saved/outputs \
+	--config <path_to_configs_config.yaml> \
+	--data_dir <path_to_dataset> \
+	--artifact_dir <path_to_saved_outputs> \
 	--num_checkpoints 100 \
 	--run_id <id of the job run to continue from e.g.: cec0fba0-4ce5-4fa0-a2b5-f8a0cd36200f> \
 	--resume_step 100
 ```
 
 ### Monitoring training progress
-```commandline
-tensorboard --logdir /path/to/<run id e.g.: cec0fba0-4ce5-4fa0-a2b5-f8a0cd36200f/tensorboard>
-```
 
-> **Note:** Please check the tensorboard summaries (scalar, histogram, and image) for detailed training 
-> information logged at specific intervals mentioned in the config file. For example, `eval_freq: 1000` in the config file
-> means that the model will be evaluated every 1000 steps and the results will be logged to tensorboard (image summary).
+To monitor the training progress of your model, you can use the following commands in your terminal or command prompt:
+
+```bash
+tensorboard --logdir <path_to_run id e.g.: cec0fba0-4ce5-4fa0-a2b5-f8a0cd36200f/tensorboard>
+```
+> **Note:** Please check the tensorboard summaries (scalar, histogram, and image) for detailed training information logged at specific intervals mentioned in the config file. For example, eval_freq: 1000 in the config file means that the model will be evaluated every 1000 steps and the results will be logged to tensorboard (image summary).
 
 ## Sampling
-### Sampling from a model checkpoint
-```commandline
+
+To sample from the trained model use the following command:
+
+```bash
 torchrun --standalone --nnodes=1 --nproc-per-node=1 image_sample.py \
-	--config /path/to/configs/config.yaml \
-	--model_path /path/to/model_checkpoint_<iteration number>.pt.tar \
-	--data_dir /path/to/dataset \
-	--artifact_dir /path/to/save/results \
+	--config <path_to_config.yaml> \
+	--model_path <path_to_model_checkpoint_<iteration number>.pt.tar> \
+	--data_dir <path_to_dataset> \
+	--artifact_dir <path_to_save_results> \
 	--num_batches <sample only this many of batches, ignore for full execution>
 ```
+> **Note:** Add `--test_model` UnetTest argument if the model you are sampling from is a debugging model. Recommended to use the prod model (default model) for the sampling.
 
-> **Note:**  Add `--test_model UnetTest` argument if the model you are sampling from is a debugging model.
-> Recommended to use the prod model (default model) for the sampling. 
-
-> **Note:** Exponential Moving Averages (EMA) of model weights can also be used to sample from.  
-> If EMA checkpoint is available for the iteration of model to sample from, then modify the line as 
-> `--model_path /path/to/ema_checkpoint_<iteration number>.pt.tar`. EMA checkpoints can be found in the
-> same directory as the model checkpoints.
+> **Note:** Exponential Moving Averages (EMA) of model weights can also be used to sample from.
+If EMA checkpoint is available for the iteration of model to sample from, then modify the line as `--model_path /path/to/ema_checkpoint_<iteration number>.pt.tar`. EMA checkpoints can be found in the same directory as the model checkpoints.
 
 ## Evaluation
-### FID score
-```commandline
+
+### FID Score
+
+FID score can be calculated using the following command:
+
+```bash
 torchrun --standalone --nnodes=1 --nproc-per-node=1 fid.py \
-	--real_path /path/to/real/validation/images  \
-	--syn_path /path/to/sampled/validation/images \
+	--real_path <path_to_real_validation_images>  \
+	--syn_path <path_to_sampled_validation_images> \
 	--batch_size 4 \
 	--image_max_value 255 \
 	--image_min_value 0 \
-	--save_path /path/to/save/results
+	--save_path <path_to_save_results>
 ```
 
-### Segment-Anything score
-```commandline
+### Segment-anything Score
+
+Segment-anything score is calculated with the help of [SAM model](https://segment-anything.com/). It is the IOU of the sampled image segmentation mask which is segmented by the help of segment-anything and real mask. For more details, please refer to the paper. 
+
+Segment-anything score can be calculated as follows:
+
+```bash
 torchrun --standalone --nnodes=1 --nproc-per-node=1 sam.py \
 	--num_points 5 \
 	--image_max_value 255 \
@@ -156,347 +167,83 @@ torchrun --standalone --nnodes=1 --nproc-per-node=1 sam.py \
 	--batch_size 2 \
 	--num_batches <do only this many of batches to collect statistics, ignore for full execution> \
 	--num_classes 2 \
-	--image_dir /path/to/sampled/images \
-	--annotation_dir /path/to/real/annotations \
-	--sam_checkpoint /path/to/sam_vit_h_4b8939.pth \
+	--image_dir <path_to_sampled_images> \
+	--annotation_dir <path_to_real_annotations> \
+	--sam_checkpoint <path_to_sam_vit_h_4b8939.pth> \
 	--model_type vit_h \
-	--save_dir /path/to/save/results
+	--save_dir <path_to_save_results>
+
 ```
+> **Note** The above SAM script runs in cpu mode. To run in gpu mode, add `--gpu` argument.
 
-> **Note:** The above SAM script runs in cpu mode. To run in gpu mode, add `--gpu` argument.
+### Similarity Search
+ 
+Similarity search is employed to identify images similar to the generated ones in the training dataset by comparing embedding vectors that are created with pre-trained Inception v3 model, and cosine similarity is utilized to compare these embedding vectors. 
 
-### Similarity search
-```commandline
+<p align="center">
+<img src=assets/similarity_search_128.svg />
+</p>
+
+You can run similarity search by using following command: 
+
+```bash
 torchrun --standalone --nnodes=1 --nproc-per-node=1 similarity_search.py \
-	--search_path /path/to/real/training/images  \
-	--image_path /path/to/sampled/images/sample_0.npy /path/to/sampled/images/sample_1.npy \
+	--search_path <path_to_real_training_images>  \
+	--image_path <path_to_sampled_images_sample_0.npy> <path_to_sampled_images_sample_1.npy> \
 	--top_k 3 \
 	--batch_size 8 \
 	--image_size 64 \
 	--image_max_value 255 \
 	--image_min_value 0 \
-	--save_path /path/to/save/results
+	--save_path <path_to_save_results>
 ```
 
 ### Interpolation
-```commandline
+<p align="center">
+<img src=assets/interpolate_128.svg />
+</p>
+To interpolate between two images, use the following command:
+
+```bash
 python interpolate.py \
-	--image_a_path /path/to/any/images/image_a.npy \
-	--image_b_path /path/to/any/images/image_b.npy \
-	--mask_path /path/to/any/annotations/mask.npy \
-	--model_path /path/to/model_checkpoint_<iteration number>.pt.tar \
-	--config /path/to/configs/config.yaml \
+	--image_a_path <path_to_any_images_image_a.npy> \
+	--image_b_path <path_to_any_images_image_b.npy> \
+	--mask_path <path_to_any_annotations_mask.npy> \
+	--model_path <path_to_model_checkpoint_<iteration number>.pt.tar> \
+	--config <path_to_configs_config.yaml> \
 	--num_steps 500 \
 	--lambda_interpolate 0.2 0.8 \
-	--save_path /path/to/save/results
+	--save_path <path_to_save_results>
 ```
 
-
 ### Inpainting
-```commandline
+<p align="center">
+<img src=assets/inpaint_128.svg />
+</p>
+You can use the following to use inpainting:
+
+```bash
 python inpainting.py \
-	--image_path /path/to/any/images/cut_image.npy \
-	--mask_path /path/to/any/annotations/mask_for_cut_image.npy \
-	--model_path /path/to/model_checkpoint_<iteration number>.pt.tar \
-	--config /path/to/configs/config.yaml \
+	--image_path <path_to_any_images_cut_image.npy> \
+	--mask_path <path_to_any_annotations_mask_for_cut_image.npy> \
+	--model_path <path_to_model_checkpoint_<iteration number>.pt.tar> \
+	--config <path_to_configs_config.yaml> \
 	--num_steps 500 \
-	--save_path /path/to/save/results
+	--save_path <path_to_save_results>
 ```
 
 ### Trajectory
-```commandline
+<p align="center">
+<img src=assets/trajectory_128.svg />
+</p>
+We can create the trajectory of image synthesis with the following command:
+
+```bash
 torchrun --standalone --nnodes=1 --nproc-per-node=1 trajectory.py \
-	--config /path/to/configs/config.yaml \
-	--model_path /path/to/model_checkpoint_<iteration number>.pt.tar \
-	--data_dir /path/to/dataset \
-	--artifact_dir /path/to/save/results \
+	--config <path_to_configs_config.yaml> \
+	--model_path <path_to_model_checkpoint_<iteration number>.pt.tar> \
+	--data_dir <path_to_dataset> \
+	--artifact_dir <path_to_save_results> \
 	--save_trajectory 1000 900 800 700 600 500 400 300 200 100 0 
 ```
 
-### Experimentation
-
-Directory structure
-```
-$HOME
-├── syn10-diffusion (repo)
-├── segment-anything (repo)
-├── sam_vit_h_4b8939.pth (SAM checkpoint)
-├── raw_data (iac dataset)
-├── data (output of tiler.py)
-├── results (artifact_dir)
-```
-
-Fixed parameters
-
-Image
-- image_channels: 3
-- image_max_value: 255
-- image_min_value: 0
-- num_classes: 2
-
-Diffusion
-- s: 0.008
-- max_beta: 0.999
-- lambda_variational: 0.001
-- num_diffusion_timesteps: 1000
-
-Model
-- p_uncond: 0.2
-- lr: 0.00002
-- grad_clip: 1.0
-- weight_decay: 0.05
-- norm_channels: 32
-- model_input_channels: 3
-- model_output_channels: 6
-- ema_decay: 0.9999
-- guidance: 1.5
-- attn_resolutions: [32, 16, 8]
-- num_resnet_blocks: 2
-- t_embed_mult: 4.0
-- y_embed_mult: 1.0
-- lr_scheduler_t_mult: 1
-
-
-Checkpoint
-- ema_delay: 10000
-
-Experiment 1 (64x64, 16gb 1080Ti)
-- image_size: 64
-- dropout: 0.1
-- num_epochs: 257 (num_steps: 400k)
-- channel_mult: [1, 2, 3, 4]
-- model_channels: 64
-- head_channels: 32
-- lr_scheduler_t_0: 257
-- train_batch_size: 32
-- sample_batch_size: 32
-- checkpoint_freq: 20000
-- tensorboard_freq: 400
-- eval_freq: 20000
-
-Experiment 2 (128x128, 32gb Tesla v100)
-- image_size: 128
-- dropout: 0.0
-- num_epochs: 801 (num_steps: 2.5m)
-- channel_mult: [1, 1, 2, 3, 4]
-- model_channels: 128
-- head_channels: 64
-- lr_scheduler_t_0: 801
-- train_batch_size: 16
-- sample_batch_size: 16
-- checkpoint_freq: 50000
-- tensorboard_freq: 2500
-- eval_freq: 50000
-
-Evaluation for each experiment
-- fid (~10 models)
-- sam (best model)
-- similarity search (best model)
-- interpolation (best model)
-- inpainting (best model)
-
-Human evaluation
-- Preference between synthetic vs real images
-
-Notes
-- NVIDIA Tesla V100
-- Dataset complexity analysis
-- Batch size per GPU / Throughput images per V100-sec
-- Forward pass FLOPs
-
-Experiment 1 scripts
-```commandline
-python tiler.py \
-	--image_root_dir /home/orkhan/iac \
-	--image_extensions tif \
-	--mask_root_dir /home/orkhan/iac \
-	--mask_extensions shp \
-	--tile_size 128 \
-	--tile_overlap 0.5 \
-	--tile_keep_ratio 0.01 \
-	--downsample_factor 2 \
-	--image_max_value 255 \
-	--image_min_value 0 \
-	--image_channels 3 \
-	--num_train_samples 50000 \
-	--num_val_samples 5000 \
-	--save_dir /home/orkhan/data
-
-torchrun --standalone --nnodes=1 --nproc-per-node=1 image_train.py \
-	--config /home/orkhan/syn10-diffusion/configs/experiment_1_64.yaml \
-	--data_dir /home/orkhan/data \
-	--artifact_dir /home/orkhan/results \
-	--num_checkpoints -1
-
-torchrun --standalone --nnodes=1 --nproc-per-node=1 image_sample.py \
-	--config /home/orkhan/syn10-diffusion/configs/experiment_1_64.yaml \
-	--model_path /home/orkhan/results/438143b4-d47b-4d20-891a-3c37ef753848/checkpoint/ema_checkpoint_40000.pt.tar \
-	--data_dir /home/orkhan/data \
-	--artifact_dir /home/orkhan/results
-	
-torchrun --standalone --nnodes=1 --nproc-per-node=1 fid.py \
-	--real_path /home/orkhan/data/validation/images  \
-	--syn_path /home/orkhan/results/sampler_ema_checkpoint_40000_f816d1e3-a44d-43a4-b45d-f4fe7738d22c/images \
-	--batch_size 8 \
-	--image_max_value 255 \
-	--image_min_value 0 \
-	--save_path /home/orkhan/results
-	
-torchrun --standalone --nnodes=1 --nproc-per-node=1 sam.py \
-	--num_points 5 \
-	--image_max_value 255 \
-	--image_min_value 0 \
-	--image_size 64 \
-	--batch_size 2 \
-	--num_classes 2 \
-	--image_dir /home/orkhan/results/sampler_ema_checkpoint_40000_f816d1e3-a44d-43a4-b45d-f4fe7738d22c/images \
-	--annotation_dir /home/orkhan/results/sampler_ema_checkpoint_40000_f816d1e3-a44d-43a4-b45d-f4fe7738d22c/annotations \
-	--sam_checkpoint /home/orkhan/sam_vit_h_4b8939.pth \
-	--model_type vit_h \
-	--save_dir /home/orkhan/results
-	
-torchrun --standalone --nnodes=1 --nproc-per-node=1 similarity_search.py \
-	--search_path /home/orkhan/data/training/images  \
-	--image_path /home/orkhan/results/sampler_ema_checkpoint_40000_f816d1e3-a44d-43a4-b45d-f4fe7738d22c/images/7316c8b468964f34969b17d412d62e9d.npy \
-	--top_k 3 \
-	--batch_size 8 \
-	--image_size 64 \
-	--image_max_value 255 \
-	--image_min_value 0 \
-	--save_path /home/orkhan/results
-
-python interpolate.py \
-	--image_a_path /home/orkhan/results/sampler_ema_checkpoint_40000_f816d1e3-a44d-43a4-b45d-f4fe7738d22c/images/7316c8b468964f34969b17d412d62e9d.npy \
-	--image_b_path /home/orkhan/results/sampler_ema_checkpoint_40000_f816d1e3-a44d-43a4-b45d-f4fe7738d22c/images/3948e16ce9624364ab086f3f79b32189.npy \
-	--mask_path /home/orkhan/results/sampler_ema_checkpoint_40000_f816d1e3-a44d-43a4-b45d-f4fe7738d22c/annotations/7316c8b468964f34969b17d412d62e9d.npy \
-	--model_path /home/orkhan/results/438143b4-d47b-4d20-891a-3c37ef753848/checkpoint/ema_checkpoint_40000.pt.tar \
-	--config /home/orkhan/syn10-diffusion/configs/experiment_1_64.yaml \
-	--num_steps 500 \
-	--lambda_interpolate 0.2 0.8 \
-	--save_path /home/orkhan/results
-
-python inpainting.py \
-	--image_path /home/orkhan/results/sampler_ema_checkpoint_40000_f816d1e3-a44d-43a4-b45d-f4fe7738d22c/images/7316c8b468964f34969b17d412d62e9d.npy \
-	--mask_path /home/orkhan/results/sampler_ema_checkpoint_40000_f816d1e3-a44d-43a4-b45d-f4fe7738d22c/annotations/7316c8b468964f34969b17d412d62e9d.npy \
-	--model_path /home/orkhan/results/438143b4-d47b-4d20-891a-3c37ef753848/checkpoint/ema_checkpoint_40000.pt.tar \
-	--config /home/orkhan/syn10-diffusion/configs/experiment_1_64.yaml \
-	--num_steps 500 \
-	--save_path /home/orkhan/results
-	
-torchrun --standalone --nnodes=1 --nproc-per-node=1 trajectory.py \
-	--config /home/orkhan/syn10-diffusion/configs/experiment_1_64.yaml \
-	--model_path /home/orkhan/results/438143b4-d47b-4d20-891a-3c37ef753848/checkpoint/ema_checkpoint_40000.pt.tar \
-	--data_dir /home/orkhan/data \
-	--artifact_dir /home/orkhan/results \
-	--save_trajectory 1000 900 800 700 600 500 400 300 200 100 0 
-```
-
-Experiment 2 scripts
-```commandline
-python tiler.py \
-	--image_root_dir /home/azureuser/iac \
-	--image_extensions tif \
-	--mask_root_dir /home/azureuser/iac \
-	--mask_extensions shp \
-	--tile_size 128 \
-	--tile_overlap 0.5 \
-	--tile_keep_ratio 0.01 \
-	--downsample_factor 1 \
-	--image_max_value 255 \
-	--image_min_value 0 \
-	--image_channels 3 \
-	--num_train_samples 50000 \
-	--num_val_samples 5000 \
-	--save_dir /datadrive/data
-
-torchrun --standalone --nnodes=1 --nproc-per-node=1 image_train.py \
-	--config /home/azureuser/syn10-diffusion/configs/experiment_2_128.yaml \
-	--data_dir /datadrive/data \
-	--artifact_dir /datadrive/results \
-	--num_checkpoints -1
-
-torchrun --standalone --nnodes=1 --nproc-per-node=1 image_sample.py \
-	--config /home/azureuser/syn10-diffusion/configs/experiment_2_128.yaml \
-	--model_path /datadrive/results/c34830b4-1331-4794-af7f-f726620e9e95/checkpoint/ema_checkpoint_1250000.pt.tar \
-	--data_dir /datadrive/data \
-	--artifact_dir /datadrive/results
-
-torchrun --standalone --nnodes=1 --nproc-per-node=1 fid.py \
-	--real_path /datadrive/data/validation/images  \
-	--syn_path /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images \
-	--batch_size 64 \
-	--image_max_value 255 \
-	--image_min_value 0 \
-	--save_path /datadrive/results
-
-torchrun --standalone --nnodes=1 --nproc-per-node=1 sam.py \
-	--num_points 5 \
-	--image_max_value 255 \
-	--image_min_value 0 \
-	--image_size 128 \
-	--batch_size 2 \
-	--num_classes 2 \
-	--image_dir /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images \
-	--annotation_dir /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/annotations \
-	--sam_checkpoint /home/azureuser/sam_vit_h_4b8939.pth \
-	--model_type vit_h \
-	--save_dir /datadrive/results \
-	--gpu
-
-torchrun --standalone --nnodes=1 --nproc-per-node=1 sam.py \
-	--num_points 5 \
-	--image_max_value 255 \
-	--image_min_value 0 \
-	--image_size 128 \
-	--batch_size 2 \
-	--num_classes 2 \
-	--image_dir /datadrive/data/validation/images \
-	--annotation_dir /datadrive/data/validation/annotations \
-	--sam_checkpoint /home/azureuser/sam_vit_h_4b8939.pth \
-	--model_type vit_h \
-	--save_dir /datadrive/results \
-	--gpu
-
-torchrun --standalone --nnodes=1 --nproc-per-node=1 similarity_search.py \
-	--search_path /datadrive/data/training/images  \
-	--image_path /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images/01205b8d60cc4053aefa45c3744e5e83.npy /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images/01482c9ba199457b9ff4528bfdcf13ba.npy /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images/019760c855e04c309a6a568aad478512.npy /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images/01c25d4f5363471290ed1f7019eee844.npy /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images/021f666a5967471981e2d1787dbaa339.npy /datadrive/results/sampler_ema_checkpoint_1250000_2c64fdbc-3595-47b7-9902-a457c8ed8240/images/0275085c0e9a4f0597e66603f5bf811c.npy \
-	--top_k 3 \
-	--batch_size 32 \
-	--image_size 128 \
-	--image_max_value 255 \
-	--image_min_value 0 \
-	--save_path /datadrive/results
-
-python interpolate.py \
-	--image_a_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/interpolate_image_a.npy \
-	--image_b_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/interpolate_image_b.npy \
-	--mask_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/interpolate_mask.npy \
-	--model_path /datadrive/results/c34830b4-1331-4794-af7f-f726620e9e95/checkpoint/ema_checkpoint_1250000.pt.tar \
-	--config /home/azureuser/syn10-diffusion/configs/experiment_2_128.yaml \
-	--num_steps 600 \
-	--lambda_interpolate 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 \
-	--save_path /datadrive/results
-
-python inpainting.py \
-	--image_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/inpaint_image.npy \
-	--mask_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/inpaint_mask.npy \
-	--model_path /datadrive/results/c34830b4-1331-4794-af7f-f726620e9e95/checkpoint/ema_checkpoint_1250000.pt.tar \
-	--config /home/azureuser/syn10-diffusion/configs/experiment_2_128.yaml \
-	--num_steps 600 \ <also 650, 700, 750, 800, 850, 900, 950>
-	--save_path /datadrive/results
-
-python inpainting.py \
-	--image_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/inpaint_image_v2.npy \
-	--mask_path /home/azureuser/syn10-diffusion/evaluations/data/experiment_2_128/inpaint_mask_v2.npy \
-	--model_path /datadrive/results/c34830b4-1331-4794-af7f-f726620e9e95/checkpoint/ema_checkpoint_1250000.pt.tar \
-	--config /home/azureuser/syn10-diffusion/configs/experiment_2_128.yaml \
-	--num_steps 600 \ <also 650, 700, 750, 800, 850, 900, 950>
-	--save_path /datadrive/results
-
-torchrun --standalone --nnodes=1 --nproc-per-node=1 trajectory.py \
-	--config /home/azureuser/syn10-diffusion/configs/experiment_2_128.yaml \
-	--model_path /datadrive/results/c34830b4-1331-4794-af7f-f726620e9e95/checkpoint/ema_checkpoint_1250000.pt.tar \
-	--data_dir /datadrive/data \
-	--artifact_dir /datadrive/results \
-	--save_trajectory 1000 900 800 700 600 500 400 300 200 100 0 
-```
